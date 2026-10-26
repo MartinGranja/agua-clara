@@ -1,0 +1,15 @@
+# Parámetros del Módulo B (recorridos). Son supuestos editables, no datos medidos.
+base:            # punto de salida de los equipos (supuesto: centro de Alta Gracia)
+  nombre: Base Alta Gracia
+  lat: -31.6533
+  lng: -64.4283
+zonas:           # centros aproximados, se usan cuando un cliente no tiene coordenadas exactas
+  Alta Gracia:   {lat: -31.640, lng: -64.440}
+  La Bolsa:      {lat: -31.724, lng: -64.432}
+  Los Aromos:    {lat: -31.615, lng: -64.433}
+  Despeñaderos:  {lat: -31.814, lng: -64.293}
+equipos: [Clio gris, Clio azul]
+velocidad_kmh: 38        # velocidad media supuesta (mezcla de ruta y calle)
+factor_ruta: 1.35        # la distancia real por calle es mayor a la línea recta
+servicio_min: 30         # minutos por pileta (regla de Agua Clara: cada pileta cuenta 30 min)
+tolerancia_hora_min: 10  # retraso admitido antes de avisar que no se llega a la hora pedida

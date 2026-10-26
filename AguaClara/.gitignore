@@ -1,0 +1,14 @@
+.env
+.env.*
+!.env.example
+.vercel/
+.venv/
+__pycache__/
+.pytest_cache/
+/data/
+*.db
+*.db-shm
+*.db-wal
+
+.vercel
+.env*.local

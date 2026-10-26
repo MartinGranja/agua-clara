@@ -1,0 +1,7 @@
+paradas | propio km | OR-Tools km | brecha | propio s | método
+      6 |      16.0 |        16.0 |  0.02% |    0.000 | exacto
+      8 |      21.3 |        21.3 |  0.02% |    0.003 | exacto
+     10 |      24.8 |        24.8 |  0.02% |    0.013 | exacto
+     12 |      20.3 |        20.3 |  0.02% |    0.059 | exacto
+     14 |      30.6 |        30.6 |  0.07% |    0.017 | heurístico
+     18 |      25.6 |        25.6 |  0.66% |    0.040 | heurístico

@@ -1,0 +1,100 @@
+﻿AGUA CLARA — ENTREGA PARA CONTINUAR EL DESARROLLO
+Actualización: 11 de octubre de 2026 (v5: v3 + Módulo B con las reglas de recorrido de Agua Clara)
+
+CÓMO EJECUTAR EN WINDOWS
+1. Instalar Python 3.11 (el lanzador py debe estar disponible).
+2. Extraer TODO el ZIP. No ejecutar desde dentro del archivo comprimido.
+3. Copiar .env.example como .env en la carpeta AguaClara.
+4. Crear una clave propia en https://aistudio.google.com/apikey y completar
+   GEMINI_API_KEY=tu_clave en .env. No compartir ese archivo.
+   Mantener DATABASE_URL=sqlite:///./data/aguaclara.db y ALLOW_REMOTE=false.
+5. Ejecutar Iniciar_AguaClara.cmd. La primera vez instala dependencias
+   mediante Internet y abre http://127.0.0.1:8766/.
+6. Mantener abierta la consola. Para detener: Ctrl+C. Si se modifica .env,
+   detener el servidor y volver a iniciarlo.
+
+Sin clave de Gemini se puede abrir la interfaz, pero no completar una consulta:
+la foto y su evaluación son obligatorias. Se necesita Internet para Gemini.
+Si el modelo configurado no está habilitado o se agota la cuota del proyecto,
+revisar LLM_MODEL_NAME y la disponibilidad en Google AI Studio.
+No abrir src/index.html con doble clic: necesita el backend.
+El panel local no requiere clave por defecto porque solo admite esta computadora.
+Para probar el acceso con clave, definir ADMIN_TOKEN en .env y reiniciar.
+Los datos locales nuevos quedan en data/aguaclara.db, separados de Vercel.
+
+NOVEDAD v4 · RECORRIDO DEL DÍA (Módulo B)
+Nueva pestaña "Recorrido del día" en la web (usa la misma clave del panel de admin).
+Pegás tus anotaciones del día (prefijos //, /, ., "N limp", productos 2c 1p, horarios), el
+sistema aplica las reglas, ordena las paradas, calcula los horarios desde la hora de inicio
+y deja un mensaje por zona y equipo listo para copiar o abrir en WhatsApp. No hace falta ninguna
+variable nueva en Vercel: las tablas nuevas se crean solas. Detalle en docs/MODULO_B_RECORRIDOS.md.
+Con la base de clientes de demostración (ficticia) ya se puede probar; para usar los
+clientes reales se importa el CSV desde esa misma pantalla (no incluirlo en el ZIP ni en GitHub).
+
+QUÉ INCLUYE
+- Chat en español: foto obligatoria, evaluación automática del agua y forma
+  con Gemini, mensajes contextuales y respaldo de texto si falla la redacción.
+- Largo, ancho y profundidad obligatorios, con confirmación explícita del usuario.
+  Admite profundidad uniforme o mínima/máxima; Gemini no inventa medidas.
+- Precotización calculada en el servidor según servicio, superficie, profundidad y cobertura,
+  con las reglas de la planilla Precios_Zonas_AguaClara_v3:
+  * Recuperación: el precio del tramo es POR LIMPIEZA; se informa el total estimado de 2
+    limpiezas (pueden ser hasta 3, se confirma antes de empezar). Mantenimiento y
+    Limpieza total: 1 limpieza.
+  * Profundidad promedio (mín+máx)/2: hasta 1,5 m sin recargo; 1,75 m = x1,25; 2 m = x1,50.
+    Valores intermedios o mayores a 2 m: importe a confirmar (no se inventa un recargo).
+    El recargo se aplica sobre el total (también en Recuperación).
+    Ejemplo: 7x4 m, Mantenimiento, 1,75 m = $24.000 x 1,25 = $30.000.
+    Ejemplo: 7x4 m, Recuperación, 1,75 m = $36.000 x 1,25 = $45.000 por limpieza = $90.000 total.
+- Para más de 60 m²: tarifa de 60 m² + metros extra × (tarifa de 60 / 60), luego recargo y
+  limpiezas. Ejemplo recuperación 80 m² a 1,5 m: $60.000 por limpieza = $120.000 total.
+  Se redondea a dos decimales.
+- Aviso automático al dueño cuando el cliente confirma la consulta (nombre, teléfono, localidad,
+  día, medidas, servicio y precotización). Canales opcionales en .env: WhatsApp propio
+  (CallMeBot), Telegram y/o webhook (n8n, Make, Zapier). Se avisa una sola vez aunque el
+  cliente reintente; si falla el aviso, la consulta igual queda guardada y se puede
+  reenviar desde el panel.
+- Panel de admin: además, botón "Responder por WhatsApp" con mensaje prellenado,
+  seguimiento (Contactado / Agendado / Descartado), indicador de conversión y refresco
+  automático con aviso de consulta nueva.
+- Panel de admin: consultas, revisión de importe, exportación JSON, foto
+  e historial hasta la confirmación. El precio revisado tiene prioridad visual.
+- Persistencia local, validaciones, prevención de duplicados y pruebas.
+- Configuración para Vercel y PostgreSQL. Sitio: https://aguaclara.vercel.app/.
+  El ZIP no permite administrar ese despliegue ni incluye sus credenciales.
+
+TECNOLOGÍAS Y ORGANIZACIÓN
+- Python 3.11 local; Python 3.12 en Vercel.
+- FastAPI + Pydantic: app/api/routes.py y app/schemas.py.
+- SQLAlchemy + SQLite local; PostgreSQL/Neon y psycopg en Vercel:
+  app/repositories/store.py.
+- Gemini (modelo configurado: gemini-3.6-flash), SDK google-genai y Pillow:
+  app/services/vision_service.py y dialogue_service.py.
+- Motor de precios determinista: app/services/pricing_engine.py.
+- Tarifas y zonas: app/data/*.yaml. La IA no fija precios.
+- Interfaz HTML, CSS y JavaScript: src/ (chat.js y app.js).
+- Dependencias fijadas: requirements.lock.txt. Pruebas: tests/.
+
+QUÉ FALTA / PRÓXIMOS TRABAJOS
+1. Acordar tarifas para menos de 12 m², el hueco entre 21 y 28 m² y los
+   límites superpuestos de 40 y 54 m². Esos casos siguen a confirmar.
+2. Calcular superficies y precios para formas distintas de rectangular/cuadrada.
+   Se reconoce su forma y se piden medidas, pero quedan para revisión.
+3. Definir cobertura adicional. Localidades fuera de cobertura requieren revisión.
+4. Evaluar precisión de Gemini con un conjunto de fotos y comparar modelos/OpenCV.
+   Las pruebas actuales no acreditan precisión general de la clasificación.
+5. WhatsApp Business real (hoy el aviso al dueño usa CallMeBot/Telegram/webhook), agenda,
+   reservas y optimización de rutas (Módulo B).
+6. Usuarios/roles, recuperación de acceso, límite distribuido de peticiones,
+   política de conservación/borrado y copias de seguridad. El límite actual por IP
+   vive en memoria; el historial enviado por el navegador no es una auditoría.
+7. Separar bases de preview y producción para futuras pruebas de despliegue.
+
+VERIFICACIÓN Y ALCANCE
+161 pruebas automatizadas aprobadas en la versión entregada.
+Ejecutar: .venv\Scripts\python.exe -m pytest -q
+Se verificaron además Gemini real, persistencia de foto/chat y acceso protegido
+sobre Vercel; el precio de recuperación de 80 m² se verificó en producción.
+Los registros previos conservan su cotización original y revisión manual.
+No se incluyen claves, consultas, fotos de clientes, base de datos ni entorno virtual.
+No se modificaron tarjetas de Trello ni documentos de Drive con esta entrega.

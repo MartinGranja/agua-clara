@@ -1,0 +1,14 @@
+.env*
+.venv/
+.pytest_cache/
+**/__pycache__/
+/data/
+docs/
+tests/
+*.db
+*.db-shm
+*.db-wal
+Iniciar_AguaClara.cmd
+run.py
+requirements.lock.txt
+scripts/

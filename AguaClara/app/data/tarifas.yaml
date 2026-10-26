@@ -1,0 +1,37 @@
+version: drive-2026-09-21-v3-limpiezas-profundidad
+source: Precios_Zonas_AguaClara_v3 (Drive, hojas Precios por tramo y Profundidad y volumen)
+approved: false
+ranges:
+  - [12, 21]
+  - [28, 40]
+  - [40, 54]
+  - [54, 60]
+prices:
+  mantenimiento: [20000, 24000, 27000, 30000]
+  recuperacion: [30000, 36000, 40500, 45000]
+  limpieza_total: [140000, 170000, 200000, 230000]
+# Cantidad de limpiezas que se informan al cliente. Recuperación: el precio del tramo
+# es POR LIMPIEZA y se estiman 2 (pueden hacer falta 3; lo comunica el prestador).
+cleanings:
+  mantenimiento: 1
+  recuperacion: 2
+  limpieza_total: 1
+# Los precios asumen 1,5 m de profundidad promedio. Hasta 1,5 m: sin recargo.
+# Profundidades intermedias o mayores a 2 m no tienen multiplicador cargado: a confirmar.
+depth:
+  standard_max: 1.5
+  multipliers:
+    - [1.75, 1.25]
+    - [2, 1.5]
+services:
+  mantenimiento: Mantenimiento
+  recuperacion: Recuperación
+  limpieza_total: Limpieza total
+states:
+  cristalina: Cristalina
+  levemente_turbia: Levemente turbia
+  turbia: Turbia
+  verde_leve: Verde leve
+  verde_intenso: Verde intenso
+  verde_oscuro_opaco: Verde oscuro / opaco
+  desconocido: No estoy seguro/a
