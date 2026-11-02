@@ -35,7 +35,7 @@ const UI = (() => {
 
   const ready=api('/api/config').then(config=>Object.assign(AC_CONFIG,config));
 
-  function clean(d){return Object.fromEntries(['shape','unknown','unknownDepth','length','width','depthType','depthMin','depthMax','water','algae','zone','name','phone','day','photoName','photoOrigin','analysisId','measurementsConfirmed'].filter(k=>d[k]!==undefined).map(k=>[k,d[k]]));}
+  function clean(d){return Object.fromEntries(['shape','poolShape','unknown','unknownDepth','length','width','depthType','depthMin','depthMax','water','algae','zone','name','phone','day','photoName','photoOrigin','analysisId','measurementsConfirmed'].filter(k=>d[k]!==undefined).map(k=>[k,d[k]]));}
 
   function quote(d){return api('/api/quotes',{method:'POST',body:JSON.stringify(clean(d))});}
 
@@ -46,21 +46,23 @@ const UI = (() => {
   function download(name,content,type='application/json'){const url=URL.createObjectURL(new Blob([content],{type}));const a=document.createElement('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
 
   function priceDetail(q){if(q.price==null)return '';const p=[];if(q.cleanings>1)p.push(money(q.unitPrice)+' por limpieza × '+q.cleanings+' limpiezas (pueden ser hasta 3; se confirma antes de empezar)');if(q.depthMultiplier>1)p.push('incluye recargo por profundidad ×'+num(q.depthMultiplier));return p.join(' · ');}
+  const rangeLine=q=>q.priceRange&&q.priceRange.min!==q.priceRange.max?'Rango estimado: '+money(q.priceRange.min)+' a '+money(q.priceRange.max)+' ('+q.priceRange.basis+')':'';
+  const CERT={alta:'alta',media:'media',baja:'baja'};
   function resultText(d,q){const dims=q.dimensions;return 'AGUA CLARA · PRECOTIZACIÓN\n\n'+
 
     'Cliente: '+(d.name||'Pendiente')+'\nTeléfono: '+(d.phone||'Pendiente')+'\nLocalidad: '+(d.zone||'Pendiente')+'\nDía preferido: '+(d.day||'A coordinar')+'\n'+
 
     'Estado del agua: '+(AC_CONFIG.states[d.water]||'A confirmar')+'\nAlgas en paredes: '+(d.algae?'Sí':'No')+'\nServicio sugerido: '+(AC_CONFIG.services[q.service]||'A evaluar')+'\n'+
 
-    'Superficie: '+(dims.area===null?'A confirmar':num(dims.area)+' m²')+'\nVolumen aproximado: '+(dims.volume===null?'A confirmar':num(dims.volume)+' m³ · '+num(dims.volume*1000)+' L')+'\n'+
+    'Superficie: '+(dims.area===null?'A confirmar':num(dims.area)+' m²'+(dims.source==='aproximada_por_forma'?' (aproximada, forma '+String(dims.shape).replace('_',' ')+')':''))+'\nVolumen aproximado: '+(dims.volume===null?'A confirmar':num(dims.volume)+' m³ · '+num(dims.volume*1000)+' L')+'\n'+
 
     (dims.depth!==null?'Cálculo: '+num(dims.length)+' × '+num(dims.width)+' × '+num(dims.depth)+' m de profundidad promedio.\n':'')+
 
-    '\nPrecotización: '+(q.price===null?'A confirmar':money(q.price)+' ARS'+(q.cleanings>1?' (total estimado)':''))+'\n'+(priceDetail(q)?priceDetail(q)+'\n':'')+q.reason+'\n\nEl precio final y el día de visita se confirman con el prestador.';}
+    '\nPrecotización: '+(q.price===null?'A confirmar':money(q.price)+' ARS'+(q.cleanings>1?' (total estimado)':''))+'\n'+(rangeLine(q)?rangeLine(q)+'\n':'')+(q.certainty?'Certeza de la estimación: '+CERT[q.certainty]+'\n':'')+(priceDetail(q)?priceDetail(q)+'\n':'')+q.reason+'\n\nEl precio final y el día de visita se confirman con el prestador.';}
 
   function exportOne(r){download('AguaClara-'+r.id+'.json',JSON.stringify(r,null,2));}
 
-  function view(name){document.querySelectorAll('.view').forEach(e=>e.hidden=e.id!==name);document.querySelectorAll('.nav').forEach(e=>{e.classList.toggle('active',e.dataset.view===name);e.setAttribute('aria-pressed',String(e.dataset.view===name));});clearInterval(pollTimer);if(name==='owner'){refresh();pollTimer=setInterval(()=>{if(!document.hidden&&!document.querySelector('#owner-list details[open], #owner-list form :focus'))refresh();},20000);}}
+  function view(name){document.querySelectorAll('.view').forEach(e=>e.hidden=e.id!==name);document.querySelectorAll('.nav').forEach(e=>{e.classList.toggle('active',e.dataset.view===name);e.setAttribute('aria-pressed',String(e.dataset.view===name));});clearInterval(pollTimer);if(name==='analytics'&&typeof Analytics!=='undefined')Analytics.load();if(name==='owner'){refresh();pollTimer=setInterval(()=>{if(!document.hidden&&!document.querySelector('#owner-list details[open], #owner-list form :focus'))refresh();},20000);}}
 
   async function refresh(){
 
@@ -74,6 +76,36 @@ const UI = (() => {
 
   }
 
+  const SHAPE_LABEL=k=>(AC_CONFIG.shapes&&AC_CONFIG.shapes[k]&&AC_CONFIG.shapes[k].label)||k;
+  const pct=x=>x==null?'—':Math.round(x*100)+' %';
+  function analysisBox(a){
+    const r=a.result,m=a.meta||{},cv=m.cv||{};
+    const box=document.createElement('div');box.className='analysis-box';
+    const rows=[['Lectura de la IA',(AC_CONFIG.states[r.estado_agua]||r.estado_agua)+' · algas '+(r.presencia_algas_paredes?'sí':'no')+' · '+SHAPE_LABEL(r.tipo_pileta)],['Confianza final',pct(r.confianza)],['Índices (0–100)','turbidez '+r.indice_turbidez+' · verde '+r.intensidad_verde+' · calidad de foto '+r.calidad_foto],
+      ['Lecturas / acuerdo entre ellas',(m.muestras||1)+' lecturas · '+pct(m.acuerdoModelo)],['Visión por color',cv.es_pileta?(AC_CONFIG.states[cv.estado_agua]||cv.estado_agua)+' ('+cv.metodo+') · acuerdo '+pct(m.acuerdoCV):'no encontró agua'],['Tiempo de análisis',m.latenciaMs!=null?(m.latenciaMs/1000).toFixed(1).replace('.',',')+' s':'—'],['Modelo',a.model||'—']];
+    box.innerHTML='<h3>Análisis de la foto</h3><dl>'+rows.map(([k,v])=>'<dt>'+esc(k)+'</dt><dd>'+esc(v)+'</dd>').join('')+'</dl>'+(m.revisionSugerida?'<p class="review-error">Revisión sugerida: '+esc((m.motivos||[]).join(' '))+'</p>':'');
+    return box;
+  }
+  function validationForm(id,ev){
+    const a=ev.analysis&&ev.analysis.result,v=ev.validation||{};
+    const f=document.createElement('form');f.className='validation edit-area';
+    const water=Object.keys(AC_CONFIG.states).filter(k=>k!=='desconocido'),shapes=[...Object.keys(AC_CONFIG.shapes||{}),'indeterminado'];
+    const opt=(list,sel,lab)=>list.map(k=>'<option value="'+esc(k)+'"'+(k===sel?' selected':'')+'>'+esc(lab(k))+'</option>').join('');
+    const algae=v.algae??(a&&a.presencia_algas_paredes);
+    f.innerHTML='<h3>Estado real (para medir el acierto de la IA)</h3><p class="help">Completalo después de ver la pileta en persona. Con 30 o más consultas etiquetadas el panel de Analíticas calcula accuracy, F1 y la matriz de confusión.</p>'+
+      '<label>Estado real del agua<select name="water">'+opt(water,v.water||(a&&a.estado_agua),k=>AC_CONFIG.states[k])+'</select></label>'+
+      '<label>Algas en paredes<select name="algae"><option value="false"'+(algae?'':' selected')+'>No</option><option value="true"'+(algae?' selected':'')+'>Sí</option></select></label>'+
+      '<label>Forma real<select name="shape">'+opt(shapes,v.shape||(a&&a.tipo_pileta)||'rectangular',k=>k==='indeterminado'?'Indeterminada':SHAPE_LABEL(k))+'</select></label>'+
+      '<label>Nota (opcional)<input name="note" maxlength="300" value="'+esc(v.note||'')+'"></label><button class="primary">'+(v.at?'Actualizar estado real':'Guardar estado real')+'</button><p class="review-error" role="alert"></p>';
+    f.onsubmit=async e=>{e.preventDefault();const b=f.querySelector('button');b.disabled=true;
+      try{await api('/api/admin/requests/'+id+'/validation',{method:'PATCH',body:JSON.stringify({water:f.elements.water.value,algae:f.elements.algae.value==='true',shape:f.elements.shape.value,note:f.elements.note.value.trim()})});b.textContent='Actualizar estado real';toast('Estado real guardado.');}
+      catch(err){f.querySelector('.review-error').textContent=err.message;}finally{b.disabled=false;}};
+    return f;
+  }
+  async function fetchFile(path,name){
+    try{const r=await fetch(path,{headers:adminToken?{Authorization:'Bearer '+adminToken}:{}});if(!r.ok)throw Error(r.status===401?'Ingresá primero la clave en Panel de admin.':'No pudimos exportar el archivo.');download(name,await r.text(),'text/csv;charset=utf-8');}
+    catch(e){toast(e.message);}
+  }
   function renderOwner(){
 
     const pending=records.filter(r=>r.state==='pending').length,booked=records.filter(r=>r.outcome==='agendado').length;
@@ -84,7 +116,7 @@ const UI = (() => {
 
     $('owner-list').innerHTML=selected.length?selected.map(r=>{
 
-      const d=r.data,q=r.quote,displayPrice=r.review?.price??q.price;return '<article class="request" data-id="'+esc(r.id)+'"><div><span class="pill">'+(r.state==='reviewed'?'Revisada':'Pendiente de revisión')+'</span>'+(r.outcome?' <span class="pill outcome-'+esc(r.outcome)+'">'+esc((OUTCOMES.find(o=>o[0]===r.outcome)||[,''])[1])+'</span>':'')+'<h2>'+esc(d.name)+'</h2><p>'+esc(d.zone)+' · '+esc(d.phone)+'<br>'+esc(AC_CONFIG.services[q.service]||'Servicio a evaluar')+' · '+(q.dimensions.area==null?'Medidas a confirmar':num(q.dimensions.area)+' m²')+'</p><small>'+esc(r.id)+'<br>'+esc(new Date(r.createdAt).toLocaleString('es-AR'))+'</small></div><div><span class="help">Precotización</span><div class="amount">'+(displayPrice===null?'A confirmar':money(displayPrice))+'</div><p>'+esc(r.review?.price!=null?'Precio revisado por el administrador.':q.reason)+'</p>'+(r.review?'<span class="pill">'+(r.review.price==null?'Importe a confirmar':money(r.review.price)+' · revisado')+'</span>':'')+(priceDetail(q)?'<p>'+esc(priceDetail(q))+'</p>':'')+'<div class="inline-actions"><a class="button primary" target="_blank" rel="noopener" href="'+esc(waLink(r))+'">Responder por WhatsApp</a><button data-export="'+esc(r.id)+'">Exportar JSON</button></div><p class="notify-status">'+esc(notifyLine(r))+(AC_CONFIG.notifyChannels?.length?' <button class="link" data-notify="'+esc(r.id)+'">'+(r.notification?.ok?'Reenviar':'Enviar aviso')+'</button>':'')+'</p><div class="outcomes" role="group" aria-label="Seguimiento"><span class="help">Seguimiento</span>'+OUTCOMES.map(([k,l])=>'<button data-outcome="'+k+'" data-id="'+esc(r.id)+'" aria-pressed="'+(r.outcome===k)+'" class="chip'+(r.outcome===k?' on':'')+'">'+l+'</button>').join('')+'</div></div><details><summary>Ver datos y registrar revisión</summary><pre class="request-summary">'+esc(resultText(d,q))+'</pre>'+(r.review?'<p><b>Nota:</b> '+esc(r.review.note)+'</p>':'')+'<form class="edit-area" data-review="'+esc(r.id)+'"><label>Importe revisado en ARS<input name="price" type="number" min="1" max="10000000" step="1" '+(q.status==='sin_cobertura'?'disabled':'')+' value="'+(r.review?.price??'')+'" placeholder="A confirmar"></label><label>Motivo o nota de revisión<textarea name="note" required minlength="5" maxlength="500" rows="2">'+esc(r.review?.note||'')+'</textarea></label><button class="primary approval">Guardar revisión</button><p class="review-error" role="alert"></p></form></details><details class="evidence" data-evidence="'+esc(r.id)+'"><summary>Ver foto y conversación</summary><div class="evidence-body"></div></details></article>';
+      const d=r.data,q=r.quote,displayPrice=r.review?.price??q.price;return '<article class="request" data-id="'+esc(r.id)+'"><div><span class="pill">'+(r.state==='reviewed'?'Revisada':'Pendiente de revisión')+'</span>'+(r.outcome?' <span class="pill outcome-'+esc(r.outcome)+'">'+esc((OUTCOMES.find(o=>o[0]===r.outcome)||[,''])[1])+'</span>':'')+'<h2>'+esc(d.name)+'</h2><p>'+esc(d.zone)+' · '+esc(d.phone)+'<br>'+esc(AC_CONFIG.services[q.service]||'Servicio a evaluar')+' · '+(q.dimensions.area==null?'Medidas a confirmar':num(q.dimensions.area)+' m²')+'</p><small>'+esc(r.id)+'<br>'+esc(new Date(r.createdAt).toLocaleString('es-AR'))+'</small></div><div><span class="help">Precotización</span><div class="amount">'+(displayPrice===null?'A confirmar':money(displayPrice))+'</div>'+(q.priceRange&&!r.review?'<span class="help">'+esc(rangeLine(q))+'</span>':'')+(q.certainty?'<span class="pill certainty-'+esc(q.certainty)+'">Certeza '+esc(q.certainty)+'</span>':'')+'<p>'+esc(r.review?.price!=null?'Precio revisado por el administrador.':q.reason)+'</p>'+(r.review?'<span class="pill">'+(r.review.price==null?'Importe a confirmar':money(r.review.price)+' · revisado')+'</span>':'')+(priceDetail(q)?'<p>'+esc(priceDetail(q))+'</p>':'')+'<div class="inline-actions"><a class="button primary" target="_blank" rel="noopener" href="'+esc(waLink(r))+'">Responder por WhatsApp</a><button data-export="'+esc(r.id)+'">Exportar JSON</button></div><p class="notify-status">'+esc(notifyLine(r))+(AC_CONFIG.notifyChannels?.length?' <button class="link" data-notify="'+esc(r.id)+'">'+(r.notification?.ok?'Reenviar':'Enviar aviso')+'</button>':'')+'</p><div class="outcomes" role="group" aria-label="Seguimiento"><span class="help">Seguimiento</span>'+OUTCOMES.map(([k,l])=>'<button data-outcome="'+k+'" data-id="'+esc(r.id)+'" aria-pressed="'+(r.outcome===k)+'" class="chip'+(r.outcome===k?' on':'')+'">'+l+'</button>').join('')+'</div></div><details><summary>Ver datos y registrar revisión</summary><pre class="request-summary">'+esc(resultText(d,q))+'</pre>'+(r.review?'<p><b>Nota:</b> '+esc(r.review.note)+'</p>':'')+'<form class="edit-area" data-review="'+esc(r.id)+'"><label>Importe revisado en ARS<input name="price" type="number" min="1" max="10000000" step="1" '+(q.status==='sin_cobertura'?'disabled':'')+' value="'+(r.review?.price??'')+'" placeholder="A confirmar"></label><label>Motivo o nota de revisión<textarea name="note" required minlength="5" maxlength="500" rows="2">'+esc(r.review?.note||'')+'</textarea></label><button class="primary approval">Guardar revisión</button><p class="review-error" role="alert"></p></form></details><details class="evidence" data-evidence="'+esc(r.id)+'"><summary>Ver foto y conversación</summary><div class="evidence-body"></div></details></article>';
 
     }).join(''):'<div class="empty"><h2>No hay consultas en esta vista</h2><p>Las nuevas solicitudes aparecerán acá para su revisión.</p></div>';
 
@@ -102,6 +134,8 @@ const UI = (() => {
 
         else{const p=document.createElement('p');p.textContent='Esta consulta no tiene una foto guardada.';body.append(p);}
 
+        if(evidence.analysis)body.append(analysisBox(evidence.analysis));
+        body.append(validationForm(details.dataset.evidence,evidence));
         const history=document.createElement('details');const title=document.createElement('summary');title.textContent='Ver conversación';history.append(title);
 
         const log=document.createElement('div');log.className='saved-chat';
@@ -142,7 +176,7 @@ const UI = (() => {
 
   $('export-all').onclick=async()=>{try{const latest=await api('/api/admin/requests');download('AguaClara-consultas.json',JSON.stringify({exportedAt:new Date().toISOString(),records:latest},null,2));}catch(e){toast(e.message);}};
 
-  return {$,esc,money,num,toast,save,quote,api,ready,download,resultText,view,exportOne};
+  return {$,esc,money,num,toast,save,quote,api,ready,download,resultText,view,exportOne,fetchFile,SHAPE_LABEL};
 
 })();
 

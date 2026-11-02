@@ -1,4 +1,5 @@
 """Módulo B · arma el recorrido del día: lista → clientes → bloques zona/equipo → orden → horarios → mensaje."""
+import time
 from datetime import date
 from app.services import routing_engine as eng
 from app.services.route_geo import CFG, coords_from_link
@@ -107,6 +108,7 @@ def apply_cancellations(items, cancels, clients, warnings):
 
 
 def plan(text, clients, start='08:30', service=None, plan_date=None, travel=False, teams=2):
+    started = time.perf_counter()
     start_min = to_minutes(start)
     service = service or CFG['servicio_min']
     tol = CFG['tolerancia_hora_min']
@@ -179,7 +181,7 @@ def plan(text, clients, start='08:30', service=None, plan_date=None, travel=Fals
     depot = (CFG['base']['lat'], CFG['base']['lng'])
     cursor, origin = {}, {}
     result = {'equipos': [], 'pendientes': pending, 'dia': day_title.capitalize(), 'fecha': label_date.isoformat(), 'salida': start, 'base': CFG['base']['nombre']}
-    totals = {'km': 0.0, 'kmManual': 0.0}
+    totals = {'km': 0.0, 'kmManual': 0.0, 'kmNN': 0.0}
     skip_note = [i['client']['name'] if i['client'] else i['name'] for i in skipped]
     for (zone, team), group in blocks.items():
         t0 = cursor.get(team, start_min)
@@ -187,6 +189,7 @@ def plan(text, clients, start='08:30', service=None, plan_date=None, travel=Fals
         order, method = eng.solve(group, matrix, t0)
         opt = eng.evaluate(order, group, matrix, t0, tol)
         manual = eng.evaluate(sorted(range(len(group)), key=lambda i: group[i]['written']), group, matrix, t0, tol)
+        nn = eng.evaluate(eng.nearest_neighbor(matrix, len(group)), group, matrix, t0, tol)
         cursor[team] = opt['end']
         origin[team] = group[order[-1]]['coord']
         rows = []
@@ -201,14 +204,17 @@ def plan(text, clients, start='08:30', service=None, plan_date=None, travel=Fals
                 warnings.append(f"{s['name']}: no se llega a las {hhmm(s['time'])} (llegaría a las {hhmm(row['arrive'])}).")
         pools = sum(1 for r in rows if r['cuenta'])
         block = {'nombre': f"{zone.upper()} – {team.upper()}" if zone and team else (zone or team or 'SIN ZONA').upper(), 'zona': zone, 'equipo': team, 'metodo': method, 'paradas': rows, 'piletas': pools,
-                 'km': round(opt['km'], 1), 'minutos': round(opt['end'] - t0), 'fin': hhmm(opt['end']), 'kmManual': round(manual['km'], 1)}
+                 'km': round(opt['km'], 1), 'minutos': round(opt['end'] - t0), 'fin': hhmm(opt['end']), 'kmManual': round(manual['km'], 1), 'kmVecino': round(nn['km'], 1), 'horaFija': any(s['time'] is not None for s in group)}
         block['mensaje'] = message(block, day_title)
         result['equipos'].append(block)
         totals['km'] += opt['km']
         totals['kmManual'] += manual['km']
+        totals['kmNN'] += nn['km']
     saved = totals['kmManual'] - totals['km']
     result['resumen'] = {'paradas': sum(b['piletas'] for b in result['equipos']), 'bloques': len(result['equipos']), 'pendientes': len(pending), 'noTocan': len(skipped), 'km': round(totals['km'], 1), 'kmManual': round(totals['kmManual'], 1),
                          'ahorroKm': round(saved, 1), 'ahorroPct': round(100 * saved / totals['kmManual'], 1) if totals['kmManual'] > 0.05 else 0.0}
+    result['analitica'] = analytics(result, totals, stops, time.perf_counter() - started)
+    result['resumen'].update({k: result['analitica'][k] for k in ('ahorroMin', 'ahorroLitros', 'ahorroPesos')})
     if skip_note:
         warnings.append('No les toca esta semana (prefijo /): ' + ', '.join(skip_note) + '.')
     mode = 'sumando el traslado estimado' if travel else 'sin sumar traslado'
@@ -216,6 +222,33 @@ def plan(text, clients, start='08:30', service=None, plan_date=None, travel=Fals
     result['avisos'] = warnings
     result['mensajePendientes'] = pending_message(pending)
     return result
+
+
+def analytics(result, totals, stops, seconds):
+    """Métricas del recorrido para el informe: comparación de tres criterios, ahorro, calidad de la solución y datos usados."""
+    speed, fuel = CFG['velocidad_kmh'], CFG['combustible']
+    saved_km = totals['kmManual'] - totals['km']
+    litres = saved_km * fuel['consumo_l_100km'] / 100
+    counted = [s for s in stops if s['count']]
+    quality = {q: sum(1 for s in counted if s['quality'] == q) for q in ('exacta', 'aproximada', 'sin_ubicacion')}
+    exact = sum(1 for b in result['equipos'] if b['metodo'] == 'exacto')
+    pct = lambda a, b: round(100 * (a - b) / a, 1) if a > 0.05 else 0.0
+    free = [b for b in result['equipos'] if b['paradas'] and not b['horaFija']]
+    cm, cn, co = (round(sum(b[k] for b in free), 1) for k in ('kmManual', 'kmVecino', 'km'))
+    comparable = {'bloques': len(free), 'kmManual': cm, 'kmVecino': cn, 'kmOptimizado': co, 'ahorroVsManualPct': pct(cm, co), 'ahorroVsVecinoPct': pct(cn, co)}
+    return {
+        'kmManual': round(totals['kmManual'], 1), 'kmVecino': round(totals['kmNN'], 1), 'kmOptimizado': round(totals['km'], 1),
+        'ahorroVsManualPct': pct(totals['kmManual'], totals['km']),
+        # El vecino más cercano ignora las horas pedidas: solo se compara en bloques sin hora fija (misma restricción para todos).
+        'comparables': comparable,
+        'minTrasladoManual': round(totals['kmManual'] / speed * 60), 'minTrasladoOptimizado': round(totals['km'] / speed * 60),
+        'ahorroMin': round(saved_km / speed * 60), 'ahorroLitros': round(litres, 1), 'ahorroPesos': round(litres * fuel['precio_litro']),
+        'supuestosCombustible': f"{fuel['consumo_l_100km']} L/100 km y ${fuel['precio_litro']:,}/L".replace(',', '.'),
+        'bloquesExactos': exact, 'bloquesHeuristicos': len(result['equipos']) - exact,
+        'ubicacion': quality, 'ubicacionExactaPct': round(100 * quality['exacta'] / len(counted), 1) if counted else None,
+        'calculoMs': round(seconds * 1000),
+        'bloques': [{'nombre': b['nombre'], 'piletas': b['piletas'], 'kmManual': b['kmManual'], 'kmVecino': b['kmVecino'], 'km': b['km'], 'metodo': b['metodo'], 'minutos': b['minutos'], 'horaFija': b['horaFija']} for b in result['equipos']],
+    }
 
 
 def message(block, day_title):

@@ -1,5 +1,5 @@
 ﻿AGUA CLARA — ENTREGA PARA CONTINUAR EL DESARROLLO
-Actualización: 11 de octubre de 2026 (v5: v3 + Módulo B con las reglas de recorrido de Agua Clara)
+Actualización: noviembre de 2026 (v6: IA híbrida, texto libre, analíticas y recorrido con métricas)
 
 CÓMO EJECUTAR EN WINDOWS
 1. Instalar Python 3.11 (el lanzador py debe estar disponible).
@@ -21,6 +21,37 @@ No abrir src/index.html con doble clic: necesita el backend.
 El panel local no requiere clave por defecto porque solo admite esta computadora.
 Para probar el acceso con clave, definir ADMIN_TOKEN en .env y reiniciar.
 Los datos locales nuevos quedan en data/aguaclara.db, separados de Vercel.
+
+NOVEDAD v6 · IA MEJORADA Y ANALÍTICAS (para el informe)
+MÓDULO A (simulador de WhatsApp: no envía mensajes reales)
+- Visión híbrida: cada foto se lee 2 veces con Gemini (3 si las dos difieren mucho) y se contrasta con un
+  detector de color propio (numpy + Pillow, sin internet). La confianza final baja si las lecturas o el
+  detector no coinciden o la foto es mala; si queda baja, se pide otra foto o se avisa que el equipo revisa.
+  Variables opcionales en .env: VISION_SAMPLES=2 (1 a 3; 1 gasta menos cuota) y CV_ENABLED=true.
+- Gemini devuelve más datos por foto: índice de turbidez, intensidad de verde, calidad de la foto,
+  superficie visible, hojas/residuos y la evidencia que usó.
+- Texto libre: el cliente puede escribir "mide 8 por 5, 1,4 de profundidad, vivo en Alta Gracia" y el sistema
+  completa varios datos a la vez; también responde preguntas. Gemini propone, el servidor valida todo;
+  si Gemini falla se usan reglas. El precio NUNCA lo decide la IA: sale de la tabla de tarifas.
+- Piletas no rectangulares (ovalada, circular, riñón, en L, irregular): superficie aproximada = largo x ancho
+  x factor de la forma (editable en app/data/tarifas.yaml, sección shapes), marcada "a confirmar en la visita".
+- La precotización muestra rango de precio (análisis de sensibilidad) y certeza alta / media / baja.
+- Nueva vista "Analíticas" (clave del panel): embudo, distribuciones, calidad de la visión, accuracy, F1,
+  matriz de confusión, error del presupuesto (MAE / MAPE) y exportación a CSV.
+- Para medir el acierto real: en cada consulta del panel, "Ver foto y conversación" > "Estado real" (lo que
+  el dueño ve en la pileta). Con 30 o más consultas etiquetadas las métricas son confiables.
+- scripts/evaluar_fotos.py CARPETA etiquetas.csv [--solo-cv] compara visión por color, 1 lectura de Gemini
+  y el sistema combinado. scripts/entrenar_baseline.py CARPETA etiquetas.csv [--guardar] ajusta el detector
+  de color con fotos del dueño (leave-one-out). Los umbrales de color iniciales NO están calibrados con
+  fotos reales de Agua Clara: hasta tener fotos etiquetadas, su exactitud es desconocida.
+MÓDULO B (Recorrido del día)
+- Cada recorrido muestra: kilómetros del orden anotado vs vecino más cercano vs optimizado, tiempo de
+  traslado, litros y pesos de combustible ahorrados (9 L/100 km y $1.500/L, editables en ruteo.yaml),
+  bloques exactos vs heurísticos, % de paradas con ubicación exacta y tiempo de cálculo.
+- En "Recorridos guardados" se carga el resultado real (km y hora de fin); Analíticas calcula el error
+  de la estimación. Se guardan solo números del recorrido (sin nombres ni teléfonos) para las métricas.
+- Las distancias siguen siendo línea recta x 1,35 (sin calles reales); los kilómetros y minutos ahorrados
+  son estimaciones del modelo hasta cargar resultados reales.
 
 NOVEDAD v4 · RECORRIDO DEL DÍA (Módulo B)
 Nueva pestaña "Recorrido del día" en la web (usa la misma clave del panel de admin).

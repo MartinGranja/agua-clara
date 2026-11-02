@@ -139,7 +139,7 @@ def test_gemini_sdk_request_and_invalid_json(monkeypatch):
     assert observed['model']=='gemini-3.6-flash'
     assert observed['config'].response_mime_type=='application/json'
     assert observed['config'].response_schema is None
-    assert observed['config'].response_json_schema == Analysis.model_json_schema()
+    assert observed['config'].response_json_schema == vs.vision_schema()
 
 
 def seed(app):
@@ -217,7 +217,7 @@ def test_admin_photo_and_conversation_persist_and_are_private(client):
 
 def test_legacy_request_details(client):
     rid=str(uuid4());client.app.state.store.create(rid,{**BASE,'analysisId':None},{})
-    assert client.get('/api/admin/requests/'+rid+'/details').json()=={'photo':None,'conversation':[]}
+    assert client.get('/api/admin/requests/'+rid+'/details').json()=={'photo':None,'conversation':[],'analysis':None,'validation':None}
 
 @pytest.mark.parametrize('shape',['otra','indeterminado'])
 def test_ai_shape_without_rectangular_calculation(client,shape):

@@ -31,6 +31,13 @@ class RouteRow(Base):
     id: Mapped[str] = mapped_column(String(40),primary_key=True)
     body: Mapped[str] = mapped_column(Text)
 
+class MetricRow(Base):
+    """Eventos de analítica (un renglón por recorrido calculado). Solo números: nunca nombres ni teléfonos de clientes."""
+    __tablename__='metrics'
+    id: Mapped[str] = mapped_column(String(40),primary_key=True)
+    kind: Mapped[str] = mapped_column(String(20))
+    body: Mapped[str] = mapped_column(Text)
+
 class Conflict(Exception):
     pass
 
@@ -149,9 +156,49 @@ class Store:
     def list_routes(self):
         with Session(self.engine) as db:
             rows=sorted([json.loads(r.body) for r in db.scalars(select(RouteRow))],key=lambda r:r['createdAt'],reverse=True)
-        return [{'id':r['id'],'createdAt':r['createdAt'],'dia':r.get('dia'),'fecha':r.get('fecha'),'resumen':r.get('resumen')} for r in rows]
+        return [{'id':r['id'],'createdAt':r['createdAt'],'dia':r.get('dia'),'fecha':r.get('fecha'),'resumen':r.get('resumen'),'real':r.get('real'),'fin':max((b.get('fin') or '' for b in r.get('equipos',[])),default=None)} for r in rows]
 
     def get_route(self,route_id):
         with Session(self.engine) as db:
             row=db.get(RouteRow,str(route_id))
             return json.loads(row.body) if row else None
+
+    # --- Analíticas y validación ---
+    def set_validation(self,request_id,label):
+        """Verdad de terreno cargada por el dueño (estado real del agua, algas y forma)."""
+        with Session(self.engine) as db:
+            row=db.get(RequestRow,str(request_id))
+            if not row: raise KeyError(request_id)
+            record=json.loads(row.body);record['validation']={**label,'at':datetime.now(timezone.utc).isoformat()}
+            return self._save(db,str(request_id),record)
+
+    def list_analyses(self):
+        """Todos los análisis sin la foto (pesada): id, resultado, modelo y meta."""
+        with Session(self.engine) as db:
+            out=[]
+            for r in db.scalars(select(AnalysisRow)):
+                body=json.loads(r.body);body.pop('photo',None);body['id']=r.id;out.append(body)
+            return out
+
+    def add_metric(self,kind,body):
+        from uuid import uuid4
+        record={'id':str(uuid4()),'kind':kind,'at':datetime.now(timezone.utc).isoformat(),**body}
+        with Session(self.engine) as db:
+            db.add(MetricRow(id=record['id'],kind=kind,body=json.dumps(record,ensure_ascii=False)));db.commit()
+        return record
+
+    def list_metrics(self,kind):
+        with Session(self.engine) as db:
+            return sorted([json.loads(r.body) for r in db.scalars(select(MetricRow).where(MetricRow.kind==kind))],key=lambda m:m['at'])
+
+    def set_route_real(self,route_id,real):
+        with Session(self.engine) as db:
+            row=db.get(RouteRow,str(route_id))
+            if not row: raise KeyError(route_id)
+            record=json.loads(row.body);record['real']={**real,'at':datetime.now(timezone.utc).isoformat()}
+            row.body=json.dumps(record,ensure_ascii=False);db.commit()
+            return record
+
+    def full_routes(self):
+        with Session(self.engine) as db:
+            return sorted([json.loads(r.body) for r in db.scalars(select(RouteRow))],key=lambda r:r['createdAt'])

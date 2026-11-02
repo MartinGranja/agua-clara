@@ -8,6 +8,9 @@ class Settings(BaseSettings):
     gemini_api_key: str = ''
     llm_model_name: str = 'gemini-3.6-flash'
     llm_timeout_seconds: int = 30
+    # Visión híbrida: lecturas independientes por foto (1 a 3; 1 ahorra cuota de Gemini) y detector de color de respaldo.
+    vision_samples: int = 2
+    cv_enabled: bool = True
     database_url: str = 'sqlite:///./data/aguaclara.db'
     admin_token: str = ''
     allow_remote: bool = False

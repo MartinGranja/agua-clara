@@ -138,6 +138,17 @@ def solve(stops, matrix, start_min=0):
     return min((local_search(s, cost) for s in starts), key=cost), 'heurístico'
 
 
+def nearest_neighbor(matrix, n):
+    """Orden 'vecino más cercano' desde la base: la regla simple que se compara contra el óptimo."""
+    cur, left, order = 0, set(range(n)), []
+    while left:
+        nxt = min(left, key=lambda x: matrix.km[cur][x + 1])
+        order.append(nxt)
+        left.remove(nxt)
+        cur = nxt + 1
+    return order
+
+
 def schedule(order, stops, matrix, start_min, tolerance):
     """Horario estimado: traslado + tiempo de servicio; si hay hora fija y se llega antes, espera."""
     t, prev, rows, km = start_min, 0, [], 0.0

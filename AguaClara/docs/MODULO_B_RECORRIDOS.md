@@ -68,3 +68,15 @@ Dentro de cada zona y equipo: solución exacta hasta 12 paradas y heurística (i
 - La base real de clientes **no va en el repositorio ni en el ZIP**: se importa desde el panel. `app/data/clientes_demo.csv` es ficticio.
 - Un link corto de Maps (`maps.app.goo.gl`) no tiene coordenadas legibles: se usa el centro de la zona y se avisa. Con `maps.google.com/?q=lat,lng` queda exacto.
 - Distancias estimadas, sin tráfico ni calles. El mensaje se envía copiando o con `wa.me`; el envío automático a empleados es Fase 2.
+
+
+## Analíticas del recorrido (v6)
+
+Cada recorrido calculado guarda un registro numérico (sin nombres ni teléfonos) y la vista **Analíticas** lo resume.
+
+- **Tres criterios comparados:** orden en que se anotó, vecino más cercano y optimizado. El vecino más cercano ignora los horarios pedidos, por eso solo se compara en los bloques sin hora fija (misma restricción para los tres).
+- **Ahorro:** kilómetros, minutos de traslado (38 km/h), litros y pesos de combustible (9 L/100 km y $1.500/L, editables en `app/data/ruteo.yaml`). Un recorrido con horas fijas puede resultar más largo que el orden anotado: cumplir los horarios tiene prioridad sobre los kilómetros.
+- **Calidad de la solución:** bloques resueltos de forma exacta (Held-Karp, hasta 12 paradas) o con heurística, porcentaje de paradas con ubicación exacta y tiempo de cálculo.
+- **Resultado real:** en "Recorridos guardados" se cargan kilómetros reales y hora de fin (`PATCH /api/admin/routes/{id}/real`). Analíticas calcula MAE, MAPE y sesgo de la estimación.
+- **Exportación:** `GET /api/admin/export/rutas` (CSV).
+- **Limitación:** las distancias son línea recta x 1,35, no calles reales; los ahorros son estimaciones del modelo hasta contar con resultados reales cargados.

@@ -9,6 +9,7 @@ Water = Literal['cristalina','levemente_turbia','turbia','verde_leve','verde_int
 class Consultation(BaseModel):
     model_config = ConfigDict(extra='forbid')
     shape: Literal['rectangular','otra'] = 'rectangular'
+    poolShape: Literal['rectangular','cuadrada','circular','ovalada','en_l','rinon','irregular'] | None = None
     unknown: bool = False
     unknownDepth: bool = False
     length: float | None = Field(default=None, gt=0, le=50, allow_inf_nan=False)
@@ -87,6 +88,13 @@ class Analysis(BaseModel):
     problemas_visibles: list[str] = Field(max_length=8)
     observaciones: str = Field(min_length=1,max_length=500)
     confianza: float = Field(ge=0,le=1,allow_inf_nan=False)
+    # Rasgos adicionales (análisis de datos): permiten graduar el servicio y explicar la decisión.
+    indice_turbidez: int = Field(default=0,ge=0,le=100)       # 0 = fondo nítido, 100 = totalmente opaca
+    intensidad_verde: int = Field(default=0,ge=0,le=100)      # 0 = sin tinte verde, 100 = verde oscuro
+    calidad_foto: Literal['buena','regular','mala'] = 'buena'
+    superficie_visible_pct: int = Field(default=100,ge=0,le=100)  # cuánta superficie de la pileta se ve
+    hojas_o_residuos: bool = False
+    evidencia: str = Field(default='',max_length=300)          # qué se ve que sustenta el estado del agua
 
 class DialogueRequest(BaseModel):
     model_config = ConfigDict(extra='forbid')
@@ -111,3 +119,40 @@ class RoutePlan(BaseModel):
     traslado: bool = False
     guardar: bool = False
 
+
+class Understanding(BaseModel):
+    """Lo que el modelo entiende de un mensaje libre del cliente. Todo se valida de nuevo en el servidor."""
+    model_config = ConfigDict(extra='ignore')
+    intencion: Literal['datos','pregunta','correccion','saludo','otro'] = 'datos'
+    largo: float | None = None
+    ancho: float | None = None
+    profundidad_tipo: Literal['uniforme','variable'] | None = None
+    profundidad_min: float | None = None
+    profundidad_max: float | None = None
+    localidad: str | None = Field(default=None,max_length=80)
+    nombre: str | None = Field(default=None,max_length=80)
+    telefono: str | None = Field(default=None,max_length=40)
+    dia: str | None = Field(default=None,max_length=20)
+    respuesta: str | None = Field(default=None,max_length=600)
+
+class UnderstandRequest(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    text: str = Field(min_length=1,max_length=500)
+    step: Literal['photo','size','depthType','depth','depthMin','depthMax','zone','name','phone','day','measuresReview','review','done']
+    shape: str | None = Field(default=None,max_length=20)
+    analysisId: UUID | None = None
+
+class ValidationLabel(BaseModel):
+    """Verdad de terreno cargada por el dueño: sirve para medir el acierto real de la IA."""
+    model_config = ConfigDict(extra='forbid')
+    water: Water
+    algae: bool
+    shape: Literal['rectangular','cuadrada','circular','ovalada','en_l','rinon','irregular','indeterminado']
+    note: str = Field(default='',max_length=300)
+
+class RouteReal(BaseModel):
+    """Resultado real de un recorrido ya hecho: se compara contra lo estimado."""
+    model_config = ConfigDict(extra='forbid')
+    kmReal: float = Field(gt=0,le=1000,allow_inf_nan=False)
+    finReal: str = Field(pattern=r'^([01]\d|2[0-3]):[0-5]\d$')
+    nota: str = Field(default='',max_length=300)

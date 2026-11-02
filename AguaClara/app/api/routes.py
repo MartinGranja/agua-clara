@@ -5,7 +5,8 @@ import time
 from collections import defaultdict,deque
 from uuid import UUID,uuid4
 from fastapi import APIRouter,Request,UploadFile,File,Header,Depends,HTTPException
-from app.schemas import Consultation,CreateRequest,Review,DialogueRequest,Outcome
+from fastapi.responses import Response
+from app.schemas import Consultation,CreateRequest,Review,DialogueRequest,Outcome,UnderstandRequest,ValidationLabel,RouteReal
 from app.services.notify_service import channels,send as send_notification
 from app.services.dialogue_service import compose
 from app.services.pricing_engine import configuration
@@ -13,7 +14,10 @@ from app.services.consultation_service import ConsultationService
 from app.services.vision_service import prepare_image,analyze,MAX_BYTES,InvalidImage,VisionUnavailable
 from app.repositories.store import Conflict
 from app.schemas import ClientImport,RoutePlan
-from app.services import route_service,client_base
+from app.services import route_service,client_base,analytics_service
+from app.services.perception import perceive
+from app.services.understand_service import understand
+from app.services.pricing_engine import ZONES
 
 router=APIRouter()
 
@@ -29,6 +33,15 @@ async def dialogue(data:DialogueRequest,request:Request):
     if data.analysisId and not analysis:raise HTTPException(404,'No se encontró la evaluación.')
     try:return await asyncio.wait_for(asyncio.to_thread(compose,data.step,analysis,request.app.state.settings),18)
     except Exception:raise HTTPException(503,'No pudimos redactar el mensaje.')
+
+@router.post('/api/understand')
+async def understand_message(data:UnderstandRequest,request:Request):
+    key='understand:'+request.client.host;queue=request.app.state.vision_limiter[key];now=time.monotonic()
+    while queue and queue[0]<now-3600:queue.popleft()
+    if len(queue)>=240:raise HTTPException(429,'Intentá nuevamente más tarde.')
+    queue.append(now)
+    try:return await asyncio.wait_for(asyncio.to_thread(understand,data.text,data.step,data.shape,request.app.state.settings),20)
+    except Exception:raise HTTPException(503,'No pudimos interpretar el mensaje.')
 
 def owner(request:Request,authorization:str|None=Header(default=None)):
     settings=request.app.state.settings
@@ -71,7 +84,7 @@ def details(request_id:UUID,request:Request):
     record=request.app.state.store.get_request(request_id)
     if not record: raise HTTPException(404,'No se encontró la solicitud.')
     analysis=request.app.state.store.get_analysis(record['data'].get('analysisId'))
-    return {'photo':analysis.get('photo') if analysis else None,'conversation':record.get('conversation',[])}
+    return {'photo':analysis.get('photo') if analysis else None,'conversation':record.get('conversation',[]),'analysis':{'result':analysis['result'],'meta':analysis.get('meta'),'model':analysis.get('model')} if analysis else None,'validation':record.get('validation')}
 
 @router.patch('/api/admin/requests/{request_id}',dependencies=[Depends(owner)])
 def review(request_id:UUID,data:Review,request:Request):
@@ -91,6 +104,24 @@ def outcome(request_id:UUID,data:Outcome,request:Request):
     try:return request.app.state.store.set_outcome(str(request_id),data.outcome)
     except KeyError:raise HTTPException(404,'No se encontró la solicitud.')
 
+@router.patch('/api/admin/requests/{request_id}/validation',dependencies=[Depends(owner)])
+def validation(request_id:UUID,data:ValidationLabel,request:Request):
+    try:return request.app.state.store.set_validation(str(request_id),data.model_dump())
+    except KeyError:raise HTTPException(404,'No se encontró la solicitud.')
+
+@router.get('/api/admin/analytics',dependencies=[Depends(owner)])
+def analytics(request:Request):
+    store=request.app.state.store
+    return {'consultas':analytics_service.consultas(store.list(),store.list_analyses()),'rutas':analytics_service.rutas(store.list_metrics('plan'),store.full_routes())}
+
+@router.get('/api/admin/export/{kind}',dependencies=[Depends(owner)])
+def export(kind:str,request:Request):
+    store=request.app.state.store
+    if kind=='analisis':text=analytics_service.analysis_csv(store.list(),store.list_analyses())
+    elif kind=='rutas':text=analytics_service.routes_csv(store.list_metrics('plan'),store.full_routes())
+    else:raise HTTPException(404,'Exportación desconocida.')
+    return Response('\ufeff'+text,media_type='text/csv; charset=utf-8',headers={'Content-Disposition':f'attachment; filename=aguaclara_{kind}.csv'})
+
 @router.post('/api/analysis')
 async def analysis(request:Request,image:UploadFile=File(...)):
     host=request.client.host;now=time.monotonic();limiter=request.app.state.vision_limiter
@@ -103,10 +134,11 @@ async def analysis(request:Request,image:UploadFile=File(...)):
     if not request.app.state.settings.gemini_api_key:
         raise HTTPException(503,'El análisis de fotos no está disponible. Intentá nuevamente más tarde.')
     queue.append(now)
-    try:result=await asyncio.wait_for(asyncio.to_thread(analyze,prepared,request.app.state.settings),request.app.state.settings.llm_timeout_seconds+5)
+    settings=request.app.state.settings
+    try:result,meta=await asyncio.wait_for(asyncio.to_thread(perceive,prepared,settings,analyze),min(settings.llm_timeout_seconds*2+8,55))
     except (VisionUnavailable,TimeoutError) as e:
         raise HTTPException(503,str(e) or 'El análisis tardó demasiado. Probá nuevamente o cargá otra foto.')
-    analysis_id=str(uuid4());body={'id':analysis_id,'result':result.model_dump(),'model':request.app.state.settings.llm_model_name}
+    analysis_id=str(uuid4());body={'id':analysis_id,'result':result.model_dump(),'model':settings.llm_model_name,'meta':meta}
     stored={**body,'photo':'data:image/jpeg;base64,'+base64.b64encode(prepared).decode('ascii')}
     await asyncio.to_thread(request.app.state.store.save_analysis,analysis_id,stored)
     return body
@@ -146,9 +178,11 @@ def plan_route(data:RoutePlan,request:Request):
     result=route_service.plan(data.lista,items,data.inicio,data.servicio,data.fecha,data.traslado,data.equipos)
     result['baseDemo']=demo
     if not result['resumen']['paradas'] and not result['pendientes']:raise HTTPException(422,'No se reconoció ninguna parada en la lista.')
+    metric=analytics_service.plan_metrics(result)
     if data.guardar:
         saved=request.app.state.store.save_route(str(uuid4()),{**result,'lista':data.lista})
-        result['id']=saved['id']
+        result['id']=metric['rutaId']=saved['id']
+    if result['resumen']['paradas']:request.app.state.store.add_metric('plan',metric)
     return result
 
 @router.get('/api/admin/routes',dependencies=[Depends(owner)])
@@ -159,3 +193,8 @@ def route_detail(route_id:UUID,request:Request):
     record=request.app.state.store.get_route(route_id)
     if not record:raise HTTPException(404,'No se encontró el recorrido.')
     return record
+
+@router.patch('/api/admin/routes/{route_id}/real',dependencies=[Depends(owner)])
+def route_real(route_id:UUID,data:RouteReal,request:Request):
+    try:return request.app.state.store.set_route_real(str(route_id),data.model_dump())
+    except KeyError:raise HTTPException(404,'No se encontró el recorrido.')

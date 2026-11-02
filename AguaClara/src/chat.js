@@ -1,34 +1,108 @@
 'use strict';
-/* Evolución del chat publicado y del código aportado por el usuario.
-   Conserva el diálogo por estados y los comandos de corrección.
-   El backend valida, precotiza, persiste y analiza fotografías con Gemini. */
+/* Simulador de WhatsApp de Agua Clara (no envía mensajes reales).
+   Diálogo por estados + comprensión de texto libre (/api/understand: Gemini y reglas, siempre re-validado en el servidor).
+   El backend analiza la foto (lecturas múltiples + visión clásica), valida y precotiza; el precio sale solo de la tabla de tarifas. */
 (() => {
   const {$,num,money} = UI;
   const normalize = text => text.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim();
   const days=['Lunes','Martes','Miércoles','Jueves','Viernes','Sábado','A coordinar'];
   let state='photo',data={},photoUrl='',savedId=null,epoch=0,uploading=false,busy=false,cachedQuote=null,requestId=crypto.randomUUID(),lastFile=null,lastOrigin='file',analysisResult=null;
   let conversation=[],pendingEvaluation=false;
+  function typing(on){
+    let t=$('typing');
+    if(on&&!t){t=document.createElement('div');t.id='typing';t.className='bubble typing';t.setAttribute('aria-label','Agua Clara está escribiendo');t.append(document.createElement('i'),document.createElement('i'),document.createElement('i'));$('messages').append(t);$('messages').scrollTop=$('messages').scrollHeight;}
+    else if(!on&&t)t.remove();
+  }
   function draw(text,you=false,image='',result=false){
+    typing(false);
     conversation.push({role:you?'user':'assistant',text,at:new Date().toISOString(),image:Boolean(image)});
     const bubble=document.createElement('div');bubble.className='bubble'+(you?' you':'')+(result?' result':'');
     if(image){const img=document.createElement('img');img.src=image;img.alt='Foto adjunta de la pileta';bubble.append(img);}
     const body=document.createElement('span');body.textContent=text;
-    const time=document.createElement('small');time.textContent=new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'});bubble.append(body,time);$('messages').append(bubble);$('messages').scrollTop=$('messages').scrollHeight;
+    const time=document.createElement('small');time.textContent=new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'});if(you){const ticks=document.createElement('span');ticks.className='ticks';ticks.textContent=' ✓✓';ticks.setAttribute('aria-label','entregado');time.append(ticks);}bubble.append(body,time);$('messages').append(bubble);$('messages').scrollTop=$('messages').scrollHeight;
   }
   function reply(text,result=false){draw(text,false,'',result);}
+  const label=(map,key)=>(map&&map[key]&&(map[key].label||map[key]))||key;
+  function drawAnalysis(result,meta){
+    const water=AC_CONFIG.states[result.estado_agua]||result.estado_agua,shape=label(AC_CONFIG.shapes,result.tipo_pileta),pct=Math.round(result.confianza*100);
+    const text='Lo que vi en tu foto: agua '+water.toLowerCase()+', '+(result.presencia_algas_paredes?'con':'sin')+' algas en las paredes, pileta '+shape.toLowerCase()+'. Confianza '+pct+' %.';
+    conversation.push({role:'assistant',text,at:new Date().toISOString(),image:false});
+    const card=document.createElement('div');card.className='bubble result analysis';
+    const title=document.createElement('b');title.textContent='Lo que vi en tu foto';card.append(title);
+    const rows=[['Agua',water],['Algas en paredes',result.presencia_algas_paredes?'Sí':'No'],['Forma',shape],['Calidad de la foto',result.calidad_foto]];
+    const list=document.createElement('dl');rows.forEach(([k,v])=>{const dt=document.createElement('dt'),dd=document.createElement('dd');dt.textContent=k;dd.textContent=v;list.append(dt,dd);});card.append(list);
+    const meter=document.createElement('div');meter.className='meter';meter.setAttribute('role','img');meter.setAttribute('aria-label','Confianza '+pct+' por ciento');const bar=document.createElement('i');bar.style.width=pct+'%';meter.append(bar);
+    const cap=document.createElement('small');cap.textContent='Confianza de la lectura: '+pct+' %'+(meta&&meta.muestras>1?' · '+meta.muestras+' lecturas contrastadas con visión por color':'');card.append(meter,cap);
+    if(meta&&meta.revisionSugerida){const note=document.createElement('small');note.className='review-note';note.textContent='El equipo va a revisar esta foto antes de confirmar el precio.';card.append(note);}
+    typing(false);$('messages').append(card);$('messages').scrollTop=$('messages').scrollHeight;
+  }
+  function missingState(){
+    if(data.length==null||data.width==null)return 'size';
+    if(!data.depthType)return 'depthType';
+    if(data.depthMin==null)return data.depthType==='uniforme'?'depth':'depthMin';
+    if(data.depthType==='variable'&&data.depthMax==null)return 'depthMax';
+    if(!data.measurementsConfirmed)return 'measuresReview';
+    if(!data.zone)return 'zone';
+    if(!data.name)return 'name';
+    if(!data.phone)return 'phone';
+    if(!data.day)return 'day';
+    return 'review';
+  }
+  function applyFields(f){
+    const done=[];
+    if(f.length!=null&&f.width!=null){data.length=f.length;data.width=f.width;data.unknown=false;data.measurementsConfirmed=false;done.push(num(f.length)+' × '+num(f.width)+' m');}
+    if(state==='depthMax'&&f.depthMax==null&&f.depthMin!=null&&f.depthType!=='uniforme'){f.depthMax=f.depthMin;delete f.depthMin;}
+    if(f.depthMin!=null||f.depthMax!=null||f.depthType){
+      data.unknownDepth=false;data.measurementsConfirmed=false;
+      if(f.depthType)data.depthType=f.depthType;
+      if(f.depthMin!=null)data.depthMin=f.depthMin;
+      if(f.depthMax!=null)data.depthMax=f.depthMax;
+      if(!data.depthType&&data.depthMin!=null)data.depthType=data.depthMax!=null&&data.depthMax!==data.depthMin?'variable':'uniforme';
+      if(data.depthType==='uniforme'&&data.depthMin!=null)data.depthMax=data.depthMin;
+      if(data.depthType==='variable'&&f.depthType==='variable'&&f.depthMax==null&&f.depthMin==null)delete data.depthMax;
+      if(data.depthType==='variable'&&data.depthMin!=null&&data.depthMax!=null&&data.depthMax<data.depthMin)[data.depthMin,data.depthMax]=[data.depthMax,data.depthMin];
+      if(data.depthMin!=null)done.push('profundidad '+(data.depthType==='variable'&&data.depthMax!=null?num(data.depthMin)+' a '+num(data.depthMax):num(data.depthMin))+' m');
+    }
+    if(f.zone){data.zone=f.zone;done.push('localidad '+f.zone);if(!AC_CONFIG.zones.includes(f.zone))done.push('(fuera de la cobertura confirmada: queda para revisión)');}
+    if(f.name){data.name=f.name;done.push('nombre '+f.name);}
+    if(f.phone){try{PricingEngine.contact({name:data.name||'xx',phone:f.phone,day:'A coordinar'});data.phone=f.phone;done.push('teléfono');}catch{}}
+    if(f.day){data.day=f.day;done.push('día '+f.day);}
+    return done;
+  }
+  async function interpret(text,t){
+    if(!['size','depthType','depth','depthMin','depthMax','zone','name','phone','day','measuresReview','review'].includes(state))return false;
+    const quick=new Set(['uniforme','variable','a coordinar','confirmar consulta','confirmar datos','confirmo','si','dale','todo bien','esta bien','confirmar medidas','corregir medidas',...days.map(normalize),...AC_CONFIG.zones.map(normalize)]);
+    if(quick.has(t))return false;
+    const token=epoch;busy=true;buttons([]);typing(true);$('status').textContent='Escribiendo…';
+    let u=null;
+    try{u=await UI.api('/api/understand',{method:'POST',body:JSON.stringify({text,step:state,shape:data.shape==='otra'?(data.poolShape||null):(data.shape||null),analysisId:data.analysisId||null})});}catch{u=null;}
+    if(token!==epoch)return true;
+    typing(false);busy=false;$('status').textContent='en línea';
+    if(!u)return false;
+    const fields=u.fields||{};
+    if(!Object.keys(fields).length){
+      if(u.intent==='pregunta'&&u.reply){reply(u.reply);if(state!=='review')await prompt();else buttons(['Confirmar consulta','Cambiar medidas','Cambiar profundidad','Cambiar localidad','Cambiar foto','Cambiar contacto','Cambiar día','Descargar resumen']);return true;}
+      return false;
+    }
+    if(state==='review')requestId=crypto.randomUUID();
+    const done=applyFields({...fields});
+    if(!done.length)return false;
+    cachedQuote=null;reply('Anoté: '+done.join(' · ')+'.');
+    advance(missingState());return true;
+  }
   function buttons(labels){$('actions').replaceChildren();labels.forEach(label=>{const b=document.createElement('button');b.type='button';b.textContent=label;b.onclick=()=>submit(label);$('actions').append(b);});}
   async function quote(){return await UI.quote(data);}
   function summary(){return cachedQuote?UI.resultText(data,cachedQuote):'Todavía faltan datos para precotizar. Completá el recorrido para ver el resumen.';}
   async function prompt(){
-    if(state==='review'){const token=epoch;busy=true;$('status').textContent='Calculando…';buttons([]);try{const result=await quote();if(token!==epoch)return;cachedQuote=result;}catch(e){if(token===epoch){reply(e.message);buttons(['Reintentar cálculo','Cambiar medidas','Cambiar localidad']);}return;}finally{if(token===epoch){busy=false;$('status').textContent='Asistente de atención';}}if(token!==epoch)return;}
+    if(state==='review'){const token=epoch;busy=true;$('status').textContent='Calculando…';buttons([]);try{const result=await quote();if(token!==epoch)return;cachedQuote=result;}catch(e){if(token===epoch){reply(e.message);buttons(['Reintentar cálculo','Cambiar medidas','Cambiar localidad']);}return;}finally{if(token===epoch){busy=false;$('status').textContent='en línea';}}if(token!==epoch)return;}
     const prompts={
       photo:['Compartí una foto de la pileta para evaluar el estado del agua.',['Sacar foto ahora','Cargar foto']],
-      size:['¿Cuánto mide de largo y de ancho, en metros? Por ejemplo: “7 por 4”, “7 × 4 m” o “tiene 7 de largo y 4 de ancho”.',[]],
+      size:[data.shape==='otra'&&data.poolShape?'Veo que es una pileta '+label(AC_CONFIG.shapes,data.poolShape).toLowerCase()+'. Pasame el largo y el ancho máximos, en metros (por ejemplo “7 por 4”), y calculo la superficie aproximada según la forma. Si querés, contame todo junto: medidas, profundidad y localidad.':'¿Cuánto mide de largo y de ancho, en metros? Por ejemplo: “7 por 4”, “7 × 4 m” o “tiene 7 de largo y 4 de ancho”. También podés escribir todo junto: medidas, profundidad y localidad.',[]],
       depthType:['¿La profundidad es uniforme o cambia de un extremo al otro?',['Uniforme','Variable']],
       depth:['¿Cuál es la profundidad, en metros? Acepto coma decimal: por ejemplo “1,4 m”.',[]],
       depthMin:['¿Cuál es la profundidad mínima, en metros?',[]],
       depthMax:['¿Y la profundidad máxima? Debe ser igual o mayor que la mínima ('+data.depthMin+' m).',[]],
-      measuresReview:['Confirmame estos datos: '+num(data.length)+' m de largo × '+num(data.width)+' m de ancho. Profundidad '+(data.depthType==='variable'?'de '+num(data.depthMin)+' a '+num(data.depthMax)+' m':num(data.depthMin)+' m')+'. ¿Son correctos?',['Confirmar medidas','Corregir medidas']],
+      measuresReview:['Confirmame estos datos: '+num(data.length)+' m de largo × '+num(data.width)+' m de ancho. Profundidad '+(data.depthType==='variable'?'de '+num(data.depthMin)+' a '+num(data.depthMax)+' m':num(data.depthMin)+' m')+'. '+(data.shape==='otra'&&data.poolShape?'Es una forma '+label(AC_CONFIG.shapes,data.poolShape).toLowerCase()+': la superficie es aproximada y se confirma en la visita. ':'')+'¿Son correctos?',['Confirmar medidas','Corregir medidas']],
       zone:['¿En qué localidad está la pileta? Si es otra localidad, escribí su nombre.',AC_CONFIG.zones],
       name:['¿Cómo te llamás?',[]],
       phone:['¿Qué teléfono de contacto querés dejar? Incluí el código de área.',[]],
@@ -39,16 +113,16 @@
     const [text,choices]=prompts[state];
     if(['review','done','measuresReview'].includes(state)){reply(text,state==='review');buttons(choices);return;}
     const token=epoch,step=state,withEvaluation=pendingEvaluation;pendingEvaluation=false;
-    busy=true;buttons([]);$('status').textContent='Escribiendo…';
+    busy=true;buttons([]);typing(true);$('status').textContent='Escribiendo…';
     let message=text;
     try{const result=await UI.api('/api/dialogue',{method:'POST',body:JSON.stringify({step,analysisId:withEvaluation?data.analysisId:null})});message=result.message;}
-    catch{if(withEvaluation)message=analysisResult.observaciones+'\n\n'+(data.shape==='otra'?'El cálculo del importe requiere revisión por la forma de la pileta. ':'')+text;}
+    catch{if(withEvaluation)message=analysisResult.observaciones+'\n\n'+text;}
     if(token!==epoch)return;
-    reply(message);buttons(choices);busy=false;$('status').textContent='Asistente de atención';
+    reply(message);buttons(choices);busy=false;$('status').textContent='en línea';
   }
   function advance(next){cachedQuote=null;state=next;prompt();}
-  function continueAfterEdit(next){if(data.editing){data.editing=false;advance('review');}else advance(next);}
-  function reset(){conversation=[];pendingEvaluation=false;epoch++;uploading=false;busy=false;cachedQuote=null;requestId=crypto.randomUUID();lastFile=null;analysisResult=null;$('status').textContent='Asistente de atención';if(photoUrl)URL.revokeObjectURL(photoUrl);photoUrl='';state='photo';data={shape:'rectangular',unknown:false,unknownDepth:false};savedId=null;$('messages').replaceChildren();$('text').value='';$('photo').value='';$('camera').value='';prompt();}
+  function continueAfterEdit(){data.editing=false;advance(missingState());}
+  function reset(){conversation=[];pendingEvaluation=false;epoch++;uploading=false;busy=false;cachedQuote=null;requestId=crypto.randomUUID();lastFile=null;analysisResult=null;$('status').textContent='en línea';if(photoUrl)URL.revokeObjectURL(photoUrl);photoUrl='';state='photo';data={shape:'rectangular',unknown:false,unknownDepth:false};savedId=null;$('messages').replaceChildren();$('text').value='';$('photo').value='';$('camera').value='';prompt();}
   function numericText(text,label,max){
     const raw=text.trim().replace(/\s*(?:m|metros?|mts?)\.?$/i,'').trim();
     return PricingEngine.number(raw,label,max);
@@ -73,7 +147,8 @@
     if(/^(gracias|muchas gracias|genial|perfecto)[!.\s]*$/.test(t)){reply('¡De nada! Podés seguir con las opciones de abajo.');return;}
     if(/^(ver resumen|resumen|mis datos)$/.test(t)){reply(summary(),true);return;}
     if(state==='measuresReview'&&t==='corregir medidas'){data.measurementsConfirmed=false;advance('size');return;}
-    if(state==='measuresReview'&&t==='confirmar medidas'){data.measurementsConfirmed=true;continueAfterEdit('zone');return;}
+    if(state==='measuresReview'&&t==='confirmar medidas'){data.measurementsConfirmed=true;continueAfterEdit();return;}
+    if(state==='measuresReview'&&/^(si|correcto|son correctos|son correctas|dale|ok|esta bien|todo bien)[!.\s]*$/.test(t)){data.measurementsConfirmed=true;continueAfterEdit();return;}
     if(/^(cambiar|corregir|modificar)/.test(t)){
       if(state==='done'){reply('La consulta ya fue guardada. Revisala desde el panel de admin o iniciá una nueva; conservamos el registro original.');return;}
       const target=/profundidad/.test(t)?'depthType':/forma/.test(t)?'photo':/medida|tamano/.test(t)?'size':/localidad|zona/.test(t)?'zone':/telefono/.test(t)?'phone':/nombre|contacto/.test(t)?'name':/dia|fecha/.test(t)?'day':/foto|servicio|agua|alga/.test(t)?'photo':null;
@@ -81,6 +156,7 @@
       if(!data.day){reply('Completá primero el recorrido; después podrás corregir cada dato desde el resumen.');return;}
       requestId=crypto.randomUUID();data.editing=true;if(['size','depthType','photo'].includes(target))data.measurementsConfirmed=false;if(target==='photo')delete data.analysisId;advance(target);return;
     }
+    if(await interpret(text,t))return;
     if(/precio|cuanto (sale|cuesta|cobran)|presupuesto|tarifa/.test(t)&&!/^guardar/.test(t)){reply(data.zone?summary():'La precotización sale de la tabla de tramos, según superficie y servicio. Primero completamos los datos. El precio final queda a confirmar.',!!data.zone);return;}
     if(/que (hacen|servicios)|como funciona|que podes hacer|ayuda/.test(t)){reply('Mantenimiento, limpieza total y recuperación de agua verde. Reunimos foto, medidas, zona y contacto. No realizamos reparaciones de bombas, electricidad ni plomería.');prompt();return;}
     if(/horario|cuanto tarda|cuando vienen|disponibilidad/.test(t)){reply('El horario y la duración se coordinan con el prestador. El día preferido no representa una reserva.');return;}
@@ -110,26 +186,26 @@
       if(state==='zone'){
         const location=text.replace(/^(vivo en|estoy en|en)\s+/i,'').trim();
         if(location.length<3||location.length>80||/\d|\?|no se|no tengo/.test(normalize(location)))throw Error('Escribí una localidad de 3 a 80 caracteres.');
-        const z=AC_CONFIG.zones.find(z=>normalize(z)===normalize(location));data.zone=z||location;if(!z)reply('Esa localidad queda fuera de nuestra cobertura confirmada. Dejamos la consulta para revisar.');continueAfterEdit('name');return;
+        const z=AC_CONFIG.zones.find(z=>normalize(z)===normalize(location));data.zone=z||location;if(!z)reply('Esa localidad queda fuera de nuestra cobertura confirmada. Dejamos la consulta para revisar.');continueAfterEdit();return;
       }
       if(state==='name'){
-        const name=text.replace(/^(me llamo|mi nombre es|soy)\s+/i,'').trim();if(name.length<2||name.length>80||/[\d?]/.test(name))throw Error('Ingresá un nombre de entre 2 y 80 caracteres, sin números.');data.name=name;advance('phone');return;
+        const name=text.replace(/^(me llamo|mi nombre es|soy)\s+/i,'').trim();if(name.length<2||name.length>80||/[\d?]/.test(name))throw Error('Ingresá un nombre de entre 2 y 80 caracteres, sin números.');data.name=name;continueAfterEdit();return;
       }
       if(state==='phone'){
-        PricingEngine.contact({name:data.name,phone:text,day:'A coordinar'});data.phone=text;continueAfterEdit('day');return;
+        PricingEngine.contact({name:data.name,phone:text,day:'A coordinar'});data.phone=text;continueAfterEdit();return;
       }
       if(state==='day'){
         const day=days.find(x=>normalize(x)===t);if(!day)throw Error('Elegí uno de los días o “A coordinar”.');data.day=day;data.editing=false;advance('review');return;
       }
       if(state==='review'&&/^(confirmar consulta|confirmar datos|confirmo|si|dale|todo bien|esta bien)[!.\s]*$/.test(t)){
-        validateAll();busy=true;$('status').textContent='Enviando consulta…';const token=epoch;try{const record=await UI.save({...data},requestId,conversation);if(token!==epoch)return;savedId=record.id;cachedQuote=record.quote;state='done';prompt();}finally{if(token===epoch){busy=false;$('status').textContent='Asistente de atención';}}return;
+        validateAll();busy=true;$('status').textContent='Enviando consulta…';const token=epoch;try{const record=await UI.save({...data},requestId,conversation);if(token!==epoch)return;savedId=record.id;cachedQuote=record.quote;state='done';prompt();}finally{if(token===epoch){busy=false;$('status').textContent='en línea';}}return;
       }
       if(state==='done'){reply('La consulta ya está guardada. Podés abrir el panel de admin, descargar el resumen o iniciar otra.');return;}
       reply('Quiero asegurarme de entenderte bien.');prompt();
     }catch(err){reply(err.message);}
   }
   async function analyzeFile(file,origin){
-    delete data.analysisId;delete data.water;delete data.algae;const token=epoch;uploading=true;busy=true;$('status').textContent='Analizando foto…';buttons([]);
+    delete data.analysisId;delete data.water;delete data.algae;delete data.poolShape;const token=epoch;uploading=true;busy=true;$('status').textContent='Analizando foto…';buttons([]);typing(true);
     try{
       const form=new FormData();form.append('image',file);
       const response=await UI.api('/api/analysis',{method:'POST',body:form});
@@ -138,13 +214,15 @@
       if(!analysisResult.es_pileta){delete data.analysisId;reply('No pudimos identificar una pileta en esa imagen. Probá con otra foto.');state='photo';buttons(['Cargar foto']);return;}
       if(analysisResult.confianza<0.65||analysisResult.estado_agua==='desconocido'){delete data.analysisId;reply('La imagen no permite una evaluación suficientemente clara. Probá con otra foto con mejor luz.');advance('photo');return;}
       data.analysisId=response.id;
+      drawAnalysis(analysisResult,response.meta);
       pendingEvaluation=true;
       data.water=analysisResult.estado_agua;data.algae=analysisResult.presencia_algas_paredes;
       data.shape=['rectangular','cuadrada'].includes(analysisResult.tipo_pileta)?'rectangular':'otra';
+      if(data.shape==='otra'&&AC_CONFIG.shapes&&AC_CONFIG.shapes[analysisResult.tipo_pileta])data.poolShape=analysisResult.tipo_pileta;else delete data.poolShape;
       data.unknown=false;data.unknownDepth=false;delete data.length;delete data.width;delete data.depthMin;delete data.depthMax;
       data.measurementsConfirmed=false;data.editing=false;state='size';cachedQuote=null;await prompt();
-    }catch(e){if(token===epoch){delete data.analysisId;reply(e.message);state='photo';buttons(['Reintentar análisis','Cargar foto']);}}
-    finally{if(token===epoch){uploading=false;busy=false;$('status').textContent='Asistente de atención';}}
+    }catch(e){if(token===epoch){delete data.analysisId;typing(false);reply(e.message);state='photo';buttons(['Reintentar análisis','Cargar foto']);}}
+    finally{if(token===epoch){uploading=false;busy=false;$('status').textContent='en línea';}}
   }
   async function onPhoto(event){
     const file=event.target.files[0];event.target.value='';if(!file)return;

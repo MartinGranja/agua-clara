@@ -30,7 +30,18 @@ indeterminado si la foto no permite distinguirla. No deduzcas medidas en metros.
 En observaciones describí forma y estado del agua juntos, en español argentino natural,
 como hablando con el cliente. No digas "la IA", "el modelo", "no rectangular" ni uses
 títulos técnicos. No inventes la forma cuando no se ve el contorno.
-Devolvé solo el JSON del esquema.'''
+Además completá estos rasgos medibles, siempre dentro de lo que se ve en la foto:
+- indice_turbidez (0 a 100): 0 si se distinguen con nitidez el fondo, las juntas o los escalones;
+  50 si el fondo se adivina pero borroso; 100 si el agua es opaca y no deja ver nada del fondo.
+- intensidad_verde (0 a 100): 0 sin tinte verde; 30 tinte verde leve; 60 verde intenso;
+  90 verde oscuro casi negro. Un tinte azul, celeste o gris NO es verde.
+- calidad_foto: buena (luz pareja, pileta bien visible), regular (reflejos, sombras o ángulo
+  rasante) o mala (borrosa, oscura, muy lejana o tapada).
+- superficie_visible_pct (0 a 100): qué porción de la superficie de la pileta aparece en la foto.
+- hojas_o_residuos: true solo si se ven hojas, ramas o suciedad flotando o en el fondo.
+- evidencia: una frase corta y objetiva con lo que se ve y sustenta el estado del agua
+  (por ejemplo "fondo no visible, tinte verde parejo, algas en la línea de agua").
+Los rasgos numéricos deben ser coherentes con estado_agua. Devolvé solo el JSON del esquema.'''
 
 def prepare_image(raw:bytes,mime:str)->bytes:
     if not raw or len(raw)>MAX_BYTES: raise InvalidImage('La imagen debe tener hasta 10 MB.')
@@ -53,7 +64,14 @@ def prepare_image(raw:bytes,mime:str)->bytes:
     except (UnidentifiedImageError,OSError,ValueError,Image.DecompressionBombWarning,Image.DecompressionBombError) as exc:
         raise InvalidImage('No pudimos leer la imagen. Probá con otro archivo.') from exc
 
-def _analyze_once(image:bytes,settings)->Analysis:
+def vision_schema():
+    """Esquema que se envía a Gemini: sin 'default' (no es una palabra clave soportada) y con todos los campos requeridos."""
+    schema=Analysis.model_json_schema()
+    for prop in schema.get('properties',{}).values():prop.pop('default',None)
+    schema['required']=list(schema['properties'])
+    return schema
+
+def _analyze_once(image:bytes,settings,variant:int=0)->Analysis:
     if not settings.gemini_api_key:
         raise VisionUnavailable('El análisis de fotos no está disponible. Intentá nuevamente más tarde.')
     try:
@@ -61,10 +79,10 @@ def _analyze_once(image:bytes,settings)->Analysis:
             response=client.models.generate_content(
                 model=settings.llm_model_name,
                 contents=[types.Part.from_bytes(data=image,mime_type='image/jpeg')],
-                config=types.GenerateContentConfig(system_instruction=PROMPT,temperature=0.1,
-                    response_mime_type='application/json',response_json_schema=Analysis.model_json_schema(),
+                config=types.GenerateContentConfig(system_instruction=PROMPT,temperature=0.1 if variant==0 else 0.5,
+                    response_mime_type='application/json',response_json_schema=vision_schema(),
                     thinking_config=types.ThinkingConfig(thinking_level='minimal'),
-                    max_output_tokens=1024))
+                    max_output_tokens=1400,**({'seed':1000+variant} if variant else {})))
         result=Analysis.model_validate_json(response.text or '')
         if not result.es_pileta:
             result.estado_agua='desconocido';result.confianza=0
@@ -76,10 +94,11 @@ def _analyze_once(image:bytes,settings)->Analysis:
             raise VisionUnavailable('Se agotó la cuota diaria de Gemini. Necesitamos esperar a que se renueve para analizar otra foto; recargar la página no restablece la cuota.') from None
         raise VisionUnavailable('No pudimos analizar la foto. Intentá nuevamente o cargá otra foto.') from exc
 
-def analyze(image:bytes,settings)->Analysis:
+def analyze(image:bytes,settings,variant:int=0)->Analysis:
+    """Una lectura de la foto. `variant` > 0 pide una lectura independiente (más temperatura y otra semilla) para la votación."""
     for attempt in range(2):
         try:
-            return _analyze_once(image,settings)
+            return _analyze_once(image,settings) if variant==0 else _analyze_once(image,settings,variant)
         except VisionUnavailable as exc:
             cause=exc.__cause__
             code=getattr(cause,'code',None)
