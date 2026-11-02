@@ -13,3 +13,6 @@ velocidad_kmh: 38        # velocidad media supuesta (mezcla de ruta y calle)
 factor_ruta: 1.35        # la distancia real por calle es mayor a la línea recta
 servicio_min: 30         # minutos por pileta (regla de Agua Clara: cada pileta cuenta 30 min)
 tolerancia_hora_min: 10  # retraso admitido antes de avisar que no se llega a la hora pedida
+combustible:     # supuestos editables para estimar el ahorro en litros y pesos (no son datos medidos)
+  consumo_l_100km: 9
+  precio_litro: 1500
