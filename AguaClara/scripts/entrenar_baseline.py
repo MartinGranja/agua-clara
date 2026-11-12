@@ -15,7 +15,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from app.services import cv_baseline, metrics as m, vision_service  # noqa: E402
 from app.services.cv_baseline import STATES  # noqa: E402
-from evaluar_fotos import read_labels  # noqa: E402
+from evaluar_fotos import read_labels as _read  # noqa: E402
+
+
+def read_labels(path):
+    return [r for r in _read(path) if r.get("estado_agua")]
 
 
 def main():

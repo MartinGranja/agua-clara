@@ -1,5 +1,7 @@
 """Módulo B · configuración y lectura de ubicaciones."""
 import re
+import urllib.request
+from urllib.parse import urlparse
 from pathlib import Path
 import yaml
 
@@ -15,6 +17,33 @@ def coords_from_link(link):
             if -90 <= lat <= 90 and -180 <= lng <= 180:
                 return lat, lng
     return None
+
+
+SHORT_HOSTS = ('maps.app.goo.gl', 'goo.gl', 'g.co')
+MAPS_HOSTS = SHORT_HOSTS + ('maps.google.com', 'www.google.com', 'google.com')
+
+
+def _host_ok(url, allowed):
+    host = (urlparse(url).hostname or '').lower()
+    return any(host == h or host.endswith('.' + h) for h in allowed)
+
+
+def resolve_link(url, timeout=6):
+    """Sigue un link corto de Google Maps (maps.app.goo.gl) y devuelve (lat, lng) o None. Sólo consulta hosts de Google."""
+    if not url or not _host_ok(url, SHORT_HOSTS):
+        return None
+    try:
+        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0 (AguaClara)'})
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            final = resp.geturl()
+            if not _host_ok(final, MAPS_HOSTS):
+                return None
+            found = coords_from_link(final)
+            if found:
+                return found
+            return coords_from_link(resp.read(300000).decode('utf-8', 'ignore').replace('\\u003d', '=').replace('\\u0026', '&'))
+    except Exception:
+        return None
 
 
 def normalize_phone(raw):

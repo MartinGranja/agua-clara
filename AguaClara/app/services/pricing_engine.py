@@ -24,6 +24,20 @@ def _depth(dimensions,d,area):
     dimensions.update(depth=float(depth),min=float(depth_min),max=float(depth_max),volume=float(area*depth))
 
 
+def service_for(water, algae, last_treatment=None):
+    """Servicio que corresponde. Regla de Agua Clara:
+    - agua verde: si pasaron más de 4 meses sin limpieza ni productos, limpieza total; si no, recuperación.
+      Sin esa respuesta se decide por la foto: verde oscuro y opaco = limpieza total; el resto del verde = recuperación.
+    - agua no verde: turbia o con algas = limpieza total; si no, mantenimiento.
+    Devuelve (servicio, base) con base 'foto', 'foto+tiempo' o 'foto_sin_confirmar' (verde sin respuesta confirmada)."""
+    if water in (None,'desconocido'): return None,'foto'
+    if water.startswith('verde_'):
+        if last_treatment=='mas_4': return 'limpieza_total','foto+tiempo'
+        if last_treatment=='menos_4': return 'recuperacion','foto+tiempo'
+        return ('limpieza_total' if water=='verde_oscuro_opaco' else 'recuperacion'),'foto_sin_confirmar'
+    return ('limpieza_total' if water=='turbia' or algae else 'mantenimiento'),'foto'
+
+
 def calculate(d: Consultation) -> dict:
     dimensions={'area':None,'volume':None,'depth':None,'source':'no_disponible'}
     if d.shape=='rectangular' and not d.unknown:
@@ -39,8 +53,8 @@ def calculate(d: Consultation) -> dict:
         dimensions.update(length=d.length,width=d.width,area=float(area),source='aproximada_por_forma',shape=d.poolShape,shapeFactor=float(factor))
         _depth(dimensions,d,area)
     approximate=dimensions['source']=='aproximada_por_forma'
-    service=None if d.water=='desconocido' else 'recuperacion' if d.water.startswith('verde_') else 'limpieza_total' if d.water=='turbia' or d.algae else 'mantenimiento'
-    q={'dimensions':dimensions,'service':service,'price':None,'unitPrice':None,'cleanings':None,'depthMultiplier':None,'currency':'ARS','tariffVersion':TARIFFS['version'],'classificationSource':'declarada_usuario','status':'revision','ranges':[],'priceRange':None,'approximate':approximate}
+    service,service_basis=service_for(d.water,d.algae,d.lastTreatment)
+    q={'dimensions':dimensions,'service':service,'price':None,'unitPrice':None,'cleanings':None,'depthMultiplier':None,'currency':'ARS','tariffVersion':TARIFFS['version'],'classificationSource':'declarada_usuario','status':'revision','ranges':[],'priceRange':None,'approximate':approximate,'serviceBasis':service_basis,'lastTreatment':d.lastTreatment}
     if d.zone not in ZONES:
         return {**q,'status':'sin_cobertura','reason':'Localidad fuera de la cobertura confirmada. Se requiere revisión.'}
     if not service:

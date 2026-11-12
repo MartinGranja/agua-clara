@@ -1,4 +1,5 @@
 import asyncio
+import re
 import base64
 import secrets
 import time
@@ -15,6 +16,7 @@ from app.services.vision_service import prepare_image,analyze,MAX_BYTES,InvalidI
 from app.repositories.store import Conflict
 from app.schemas import ClientImport,RoutePlan
 from app.services import route_service,client_base,analytics_service
+from app.services.route_geo import coords_from_link,resolve_link
 from app.services.perception import perceive
 from app.services.understand_service import understand
 from app.services.pricing_engine import ZONES
@@ -161,6 +163,22 @@ def import_clients(data:ClientImport,request:Request):
     request.app.state.store.replace_clients(items,data.replace)
     return {'demo':False,'summary':client_base.summary(request.app.state.store.list_clients()),'imported':len(items),'warnings':warnings}
 
+@router.post('/api/admin/clients/resolve-links',dependencies=[Depends(owner)])
+def resolve_client_links(request:Request):
+    """Obtiene las coordenadas de los clientes cuyo link de Maps es corto (maps.app.goo.gl) y no las traen."""
+    store=request.app.state.store
+    items=store.list_clients()
+    if not items:raise HTTPException(422,'Primero importá tus clientes.')
+    pending=[c for c in items if c.get('lat') is None and c.get('link')]
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(8) as pool:found=list(pool.map(lambda c:resolve_link(c['link']),pending))
+    done,failed=0,[]
+    for c,coords in zip(pending,found):
+        if coords:c['lat'],c['lng']=coords;done+=1
+        else:failed.append(c['name'])
+    if done:store.replace_clients(items,True)
+    return {'resueltos':done,'sinCoordenadas':failed,'summary':client_base.summary(store.list_clients())}
+
 @router.delete('/api/admin/clients',dependencies=[Depends(owner)])
 def reset_clients(request:Request):
     request.app.state.store.replace_clients([],True)
@@ -175,7 +193,14 @@ def suggest(request:Request,dia:str):
 def plan_route(data:RoutePlan,request:Request):
     if not data.lista.strip():raise HTTPException(422,'Pegá la lista del día.')
     items,demo=base_clients(request.app.state.store)
-    result=route_service.plan(data.lista,items,data.inicio,data.servicio,data.fecha,data.traslado,data.equipos)
+    origin=None
+    if data.origen.strip():
+        origin=coords_from_link(data.origen)
+        if not origin:
+            m=re.match(r'^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$',data.origen)
+            origin=(float(m.group(1)),float(m.group(2))) if m else None
+        if not origin:raise HTTPException(422,'No se pudo leer el punto de partida. Pegá un link de Google Maps con coordenadas (maps.google.com/?q=lat,lng) o escribí lat,lng.')
+    result=route_service.plan(data.lista,items,data.inicio,data.servicio,data.fecha,data.traslado,data.equipos,data.optimizar,origin)
     result['baseDemo']=demo
     if not result['resumen']['paradas'] and not result['pendientes']:raise HTTPException(422,'No se reconoció ninguna parada en la lista.')
     metric=analytics_service.plan_metrics(result)

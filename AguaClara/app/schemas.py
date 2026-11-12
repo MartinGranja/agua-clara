@@ -27,6 +27,7 @@ class Consultation(BaseModel):
     photoOrigin: Literal['camera_requested','file','example'] | None = None
     analysisId: UUID | None = None
     measurementsConfirmed: bool = False
+    lastTreatment: Literal['menos_4','mas_4','no_se'] | None = None   # tiempo sin limpieza ni productos (solo se pregunta con agua verde)
 
     @field_validator('name','zone','phone',mode='before')
     @classmethod
@@ -98,7 +99,7 @@ class Analysis(BaseModel):
 
 class DialogueRequest(BaseModel):
     model_config = ConfigDict(extra='forbid')
-    step: Literal['photo','size','depthType','depth','depthMin','depthMax','zone','name','phone','day']
+    step: Literal['photo','size','depthType','depth','depthMin','depthMax','treatment','zone','name','phone','day']
     analysisId: UUID | None = None
 
 class DialogueReply(BaseModel):
@@ -118,6 +119,8 @@ class RoutePlan(BaseModel):
     servicio: int = Field(30,ge=5,le=120)
     traslado: bool = False
     guardar: bool = False
+    optimizar: bool = True
+    origen: str = Field('',max_length=300)
 
 
 class Understanding(BaseModel):
@@ -145,10 +148,16 @@ class UnderstandRequest(BaseModel):
 class ValidationLabel(BaseModel):
     """Verdad de terreno cargada por el dueño: sirve para medir el acierto real de la IA."""
     model_config = ConfigDict(extra='forbid')
-    water: Water
-    algae: bool
-    shape: Literal['rectangular','cuadrada','circular','ovalada','en_l','rinon','irregular','indeterminado']
+    service: Literal['mantenimiento','recuperacion','limpieza_total'] | None = None
+    water: Water | None = None
+    algae: bool | None = None
+    shape: Literal['rectangular','cuadrada','circular','ovalada','en_l','rinon','irregular','indeterminado'] = 'indeterminado'
     note: str = Field(default='',max_length=300)
+
+    @model_validator(mode='after')
+    def needs_label(self):
+        if self.service is None and self.water is None: raise ValueError('Indicá el servicio real o el estado real del agua.')
+        return self
 
 class RouteReal(BaseModel):
     """Resultado real de un recorrido ya hecho: se compara contra lo estimado."""

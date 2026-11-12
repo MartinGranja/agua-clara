@@ -21,6 +21,8 @@ PHONE = re.compile(r'(?<![\d.,])\d{10}(?![\d])')
 TIME_AT_END = re.compile(r'(?<![\d:.,])((?:[01]?\d|2[0-3])[:.][0-5]\d|(?:[01]?\d|2[0-3])\s*hs?)\s*$', re.I)
 TIME_AT_START = re.compile(r'^\s*((?:[01]?\d|2[0-3])[:.][0-5]\d|(?:[01]?\d|2[0-3])\s*hs?)\s+', re.I)
 LEAD = re.compile(r'^\s*(?:\d{1,2}\s*[).]\s+|[-•*·]+\s*)')
+BEFORE = re.compile(r'\bantes\s+de\s+las?\s+((?:[01]?\d|2[0-3])(?:[:.][0-5]\d)?)\s*(?:hs?\b)?', re.I)
+AFTER = re.compile(r'\bdesp[uú][eé]s\s+de\s+las?\s+((?:[01]?\d|2[0-3])(?:[:.][0-5]\d)?)\s*(?:hs?\b)?', re.I)
 PREFIX = re.compile(r'^\s*(//|/|\.)\s*')
 LIMP = re.compile(r'^(-?\d+)\s*limp\w*$', re.I)
 PRODUCT = re.compile(r'^(-?\d+(?:[.,]\d+)?)([cp])$', re.I)
@@ -40,6 +42,12 @@ ZONE_KEYS = {norm(z): z for z in ZONES}
 def to_minutes(text):
     m = re.match(r'^(\d{1,2})(?:[:.](\d{2}))?', text.strip())
     return int(m.group(1)) * 60 + int(m.group(2) or 0)
+
+
+def day_minutes(text):
+    """Hora de una restricción ('2' → 14:00 porque el trabajo empieza a la mañana; '14:30' queda igual)."""
+    m = to_minutes(text)
+    return m + 720 if m < 8 * 60 else m
 
 
 def vehicle_key(text):
@@ -153,6 +161,13 @@ def parse_client_line(line, clients, zone):
     text = URL.sub(' ', text)
     paren = [n.strip() for n in re.findall(r'\(([^)]*)\)', text) if n.strip()]
     text = re.sub(r'\([^)]*\)', ' ', text)
+    before = after = None
+    m = BEFORE.search(text)
+    if m:
+        before, text = day_minutes(m.group(1)), text[:m.start()] + ' ' + text[m.end():]
+    m = AFTER.search(text)
+    if m:
+        after, text = day_minutes(m.group(1)), text[:m.start()] + ' ' + text[m.end():]
     time = None
     m = TIME_AT_START.match(text) or None
     if m:
@@ -168,7 +183,7 @@ def parse_client_line(line, clients, zone):
     text = PHONE.sub(' ', text)
     words = text.split()
     verb_line = bool(words) and norm(words[0]) in VERBS
-    item = {'prefix': prefix, 'time': time, 'link': link, 'paren': paren, 'override': override, 'free': '', 'limp': None, 'chlorine': None, 'pills': None, 'extra': False, 'phone_hint': phone_hint}
+    item = {'prefix': prefix, 'time': time, 'before': before, 'after': after, 'link': link, 'paren': paren, 'override': override, 'free': '', 'limp': None, 'chlorine': None, 'pills': None, 'extra': False, 'phone_hint': phone_hint}
     if verb_line:
         client = _find_inside(words, clients, zone)
         item.update(extra=True, name=' '.join(words), raw_text=capitalize_note(' '.join(words) + (' ' + ' '.join('(' + p + ')' for p in paren) if paren else '')), client=client, status='ok' if client else 'sin_match', candidates=[])

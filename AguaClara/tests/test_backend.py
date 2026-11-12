@@ -29,7 +29,7 @@ def png():
 def test_tariff_boundaries(area,price):
     assert calculate(Consultation(**{**BASE,'length':area/2,'width':2}))['price']==price
 
-@pytest.mark.parametrize('state,algae,service,price', [('cristalina',False,'mantenimiento',24000),('cristalina',True,'limpieza_total',170000),('levemente_turbia',False,'mantenimiento',24000),('levemente_turbia',True,'limpieza_total',170000),('turbia',False,'limpieza_total',170000),('verde_leve',False,'recuperacion',72000),('verde_oscuro_opaco',True,'recuperacion',72000)])
+@pytest.mark.parametrize('state,algae,service,price', [('cristalina',False,'mantenimiento',24000),('cristalina',True,'limpieza_total',170000),('levemente_turbia',False,'mantenimiento',24000),('levemente_turbia',True,'limpieza_total',170000),('turbia',False,'limpieza_total',170000),('verde_leve',False,'recuperacion',72000),('verde_oscuro_opaco',True,'limpieza_total',170000)])
 def test_classification(state,algae,service,price):
     result=calculate(Consultation(**{**BASE,'water':state,'algae':algae}))
     assert (result['service'],result['price'])==(service,price)
