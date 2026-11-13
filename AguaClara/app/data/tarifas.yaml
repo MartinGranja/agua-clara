@@ -16,13 +16,12 @@ cleanings:
   mantenimiento: 1
   recuperacion: 2
   limpieza_total: 1
-# Los precios asumen 1,5 m de profundidad promedio. Hasta 1,5 m: sin recargo.
-# Profundidades intermedias o mayores a 2 m no tienen multiplicador cargado: a confirmar.
+# Criterio del comitente: el recargo por profundidad se aplica SOLO a limpieza total. Sin recargo hasta 1,75 m de profundidad promedio; desde ahí, ×1,1 por cada 10 cm completos
+# que se pasan de 1,75 m (1,85 m = ×1,1; 1,95 m = ×1,21; 2,05 m = ×1,331).
 depth:
-  standard_max: 1.5
-  multipliers:
-    - [1.75, 1.25]
-    - [2, 1.5]
+  standard_max: 1.75
+  step: 0.10
+  factor_per_step: 1.1
 services:
   mantenimiento: Mantenimiento
   recuperacion: Recuperación

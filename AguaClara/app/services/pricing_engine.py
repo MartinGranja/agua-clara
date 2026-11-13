@@ -74,11 +74,8 @@ def calculate(d: Consultation) -> dict:
     depth=Decimal(str(dimensions['depth']))
     maximum=Decimal(str(TARIFFS['ranges'][-1][1]))
     if area > maximum:
-        base=Decimal(str(TARIFFS['prices'][service][-1]))
-        extra=area-maximum
-        result=priced(q,service,base+extra*(base/maximum),depth,
-                calculation={'baseArea':float(maximum),'basePrice':float(base),'extraArea':float(extra),'pricePerExtraM2':float(base/maximum)},
-                reason='Tarifa de 60 m² más los metros adicionales al valor proporcional por m².')
+        # Más de 60 m²: no hay tarifa cargada; el comitente lo cotiza directamente con el cliente.
+        return {**q,'reason':'Pileta de más de 60 m²: no hay precio cargado, lo cotiza directamente el responsable.'}
     else:
         # Decimal preserves exact boundaries; no rounding into an adjacent tariff.
         matches=[{'min':lo,'max':hi,'price':TARIFFS['prices'][service][i]} for i,(lo,hi) in enumerate(TARIFFS['ranges']) if Decimal(lo)<=area<=Decimal(hi)]
@@ -105,9 +102,7 @@ def gap_unit(service,area):
 def unit_price(service,area):
     """Precio por limpieza del tramo que corresponde a `area` (sin recargo de profundidad); None si cae entre tramos o en un límite."""
     maximum=Decimal(str(TARIFFS['ranges'][-1][1]))
-    if area>maximum:
-        base=Decimal(str(TARIFFS['prices'][service][-1]))
-        return base+(area-maximum)*(base/maximum)
+    if area>maximum: return None   # más de 60 m²: sin tarifa, lo cotiza el responsable
     matches=[TARIFFS['prices'][service][i] for i,(lo,hi) in enumerate(TARIFFS['ranges']) if Decimal(lo)<=area<=Decimal(hi)]
     if not matches: return gap_unit(service,area)
     return Decimal(str(matches[-1]))   # en el límite de dos tramos se usa el de arriba
@@ -120,7 +115,7 @@ def _total(service,unit,factor):
 def with_range(q,service,area,depth,approximate):
     """Rango de precio por sensibilidad: ±error relativo de la superficie (más ancho si la forma es aproximada).
     Si la superficie cae entre dos tramos, el rango va del tramo inferior al superior, a confirmar."""
-    factor=depth_multiplier(depth)
+    factor=depth_multiplier(depth,service)
     if factor is None or q['status']=='sin_cobertura':
         return q
     if q['price'] is None or q.get('gap'):
@@ -145,18 +140,20 @@ def with_range(q,service,area,depth,approximate):
     return {**q,'priceRange':{'min':min(prices),'max':max(prices),'basis':basis}}
 
 
-def depth_multiplier(depth: Decimal):
-    """1,00 hasta la profundidad estándar; luego solo los multiplicadores cargados. None = a confirmar."""
-    if depth<=Decimal(str(TARIFFS['depth']['standard_max'])): return Decimal('1')
-    for value,factor in TARIFFS['depth']['multipliers']:
-        if depth==Decimal(str(value)): return Decimal(str(factor))
-    return None
+def depth_multiplier(depth: Decimal, service='limpieza_total'):
+    """Solo la limpieza total tiene recargo por profundidad (criterio del comitente): 1,00 hasta 1,75 m; luego ×1,1 por cada 10 cm completos que se pasan."""
+    if service!='limpieza_total': return Decimal('1')
+    cfg=TARIFFS['depth']
+    standard=Decimal(str(cfg['standard_max']))
+    if depth<=standard: return Decimal('1')
+    steps=int((depth-standard)//Decimal(str(cfg['step'])))
+    return (Decimal(str(cfg['factor_per_step']))**steps).quantize(Decimal('0.0001'))
 
 def priced(q,service,unit,depth,reason,**extra):
     """price = total a informar al cliente = precio por limpieza x recargo de profundidad x cantidad de limpiezas."""
-    factor=depth_multiplier(depth)
+    factor=depth_multiplier(depth,service)
     if factor is None:
-        return {**q,**extra,'reason':'La profundidad promedio no tiene un recargo cargado. Importe a confirmar.'}
+        return {**q,**extra,'reason':'No se pudo calcular el recargo por profundidad. Importe a confirmar.'}
     cleanings=TARIFFS['cleanings'][service]
     cents=Decimal('0.01')
     unit=(unit*factor).quantize(cents,rounding=ROUND_HALF_UP)

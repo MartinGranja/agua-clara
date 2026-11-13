@@ -25,7 +25,7 @@ def payload(**changes):return {'requestId':str(uuid4()),'data':{**BASE,**changes
 def png():
     out=io.BytesIO();Image.new('RGB',(32,24),(20,140,100)).save(out,format='PNG');return out.getvalue()
 
-@pytest.mark.parametrize('area,price',[(12,60000),(21,60000),(21.001,66000),(24,66000),(27.999,66000),(28,72000),(39.999,72000),(40,81000),(40.001,81000),(53.999,81000),(54,90000),(54.001,90000),(60,90000),(60.001,90001.5),(11.999,None)])
+@pytest.mark.parametrize('area,price',[(12,60000),(21,60000),(21.001,66000),(24,66000),(27.999,66000),(28,72000),(39.999,72000),(40,81000),(40.001,81000),(53.999,81000),(54,90000),(54.001,90000),(60,90000),(60.001,None),(11.999,None)])
 def test_tariff_boundaries(area,price):
     assert calculate(Consultation(**{**BASE,'length':area/2,'width':2}))['price']==price
 
@@ -230,30 +230,29 @@ def test_ai_shape_without_rectangular_calculation(client,shape):
     assert result.json()['price'] is None
     assert client.post('/api/quotes',json={**data,'shape':'rectangular'}).status_code==409
 
-@pytest.mark.parametrize('water,algae,expected',[('cristalina',False,40000),('verde_intenso',True,120000),('turbia',True,306666.67)])
-def test_proportional_above_sixty(water,algae,expected):
+@pytest.mark.parametrize('water,algae',[('cristalina',False),('verde_intenso',True),('turbia',True)])
+def test_above_sixty_is_quoted_by_owner(water,algae):
     q=calculate(Consultation(**{**BASE,'length':10,'width':8,'water':water,'algae':algae}))
-    assert q['price']==expected
-    assert q['calculation']['extraArea']==20
-    assert q['status']=='estimada'
+    assert q['price'] is None and q['status']=='revision' and 'más de 60' in q['reason']
 
 
-@pytest.mark.parametrize('depth,factor',[(1,1),(1.5,1),(1.75,1.25),(2,1.5)])
-def test_depth_multiplier_applies_to_total(depth,factor):
-    # Mantenimiento 7x4 = $24.000 (hoja Profundidad y volumen: 1,75 m -> x1,25 = $30.000).
-    q=calculate(Consultation(**{**BASE,'water':'cristalina','algae':False,'length':7,'width':4,'depthMin':depth}))
-    assert q['depthMultiplier']==factor and q['price']==24000*factor
-    r=calculate(Consultation(**{**BASE,'length':7,'width':4,'depthMin':depth}))  # recuperación: recargo sobre el total
-    assert (r['unitPrice'],r['price'])==(36000*factor,72000*factor)
+@pytest.mark.parametrize('depth,factor',[(1,1),(1.5,1),(1.75,1),(1.85,1.1),(1.95,1.21),(2,1.21),(2.05,1.331)])
+def test_depth_multiplier_applies_only_to_total_cleaning(depth,factor):
+    # Limpieza total 7x4 = $170.000; el recargo por profundidad solo se aplica a este servicio.
+    q=calculate(Consultation(**{**BASE,'water':'turbia','algae':True,'length':7,'width':4,'depthMin':depth}))
+    assert q['service']=='limpieza_total' and q['depthMultiplier']==pytest.approx(factor) and q['price']==pytest.approx(170000*factor)
+    for water,algae in (('cristalina',False),('verde_leve',True)):   # mantenimiento y recuperación: sin recargo
+        r=calculate(Consultation(**{**BASE,'water':water,'algae':algae,'lastTreatment':'menos_4','length':7,'width':4,'depthMin':depth}))
+        assert r['depthMultiplier']==1.0
 
-@pytest.mark.parametrize('depth',[1.6,1.9,2.5])
-def test_unloaded_depth_is_not_invented(depth):
-    q=calculate(Consultation(**{**BASE,'depthMin':depth}))
-    assert q['price'] is None and 'profundidad' in q['reason'].lower() and q['status']=='revision'
+@pytest.mark.parametrize('depth,factor',[(1.6,1),(1.8,1),(1.9,1.1),(2.5,1.1**7)])
+def test_depth_steps_from_1_75(depth,factor):
+    q=calculate(Consultation(**{**BASE,'water':'turbia','algae':True,'depthMin':depth}))
+    assert q['status']=='estimada' and q['depthMultiplier']==pytest.approx(factor,rel=1e-3)
 
 def test_average_depth_is_used_for_variable_depth():
     q=calculate(Consultation(**{**BASE,'depthType':'variable','depthMin':1.5,'depthMax':2}))  # promedio 1,75
-    assert q['depthMultiplier']==1.25
+    assert q['depthMultiplier']==1.0
 
 # --- Aviso al dueño y seguimiento -------------------------------------------------
 def configure_notify(client,monkeypatch,ok=True):
