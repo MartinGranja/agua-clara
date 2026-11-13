@@ -280,3 +280,18 @@ def test_route_plan_logs_metrics_and_real_result(client):
     # El evento de métrica no guarda nombres ni teléfonos de clientes.
     metric = client.app.state.store.list_metrics('plan')[0]
     assert 'lista' not in metric and 'equipos' not in metric
+
+
+def test_service_only_label_and_validation_rules(client):
+    store = client.app.state.store
+    aid = str(uuid4())
+    store.save_analysis(aid, {'id': aid, 'result': analysis().model_dump(), 'model': 't', 'meta': {'muestras': 2, 'acuerdoModelo': 1.0, 'cv': {'es_pileta': True, 'estado_agua': 'verde_intenso'}}})
+    rid = client.post('/api/requests', json={'requestId': str(uuid4()), 'data': {**BASE, 'analysisId': aid}}).json()['id']
+    url = f'/api/admin/requests/{rid}/validation'
+    assert client.patch(url, json={'note': 'sin datos'}).status_code == 422                       # falta servicio y agua
+    assert client.patch(url, json={'service': 'otro'}).status_code == 422
+    assert client.patch(url, json={'service': 'recuperacion'}).status_code == 200
+    x = client.get('/api/admin/analytics').json()['consultas']['exactitud']
+    assert x['etiquetadas'] == 1 and x['servicio']['accuracy'] == 1.0 and x['servicioVisionClasica']['accuracy'] == 1.0
+    assert x['estadoAgua']['n'] == 0 and x['algas']['n'] == 0 and x['forma']['n'] == 0              # lo que no se cargó no se cuenta
+    assert 'recuperacion' in client.get('/api/admin/export/analisis').text

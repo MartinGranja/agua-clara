@@ -64,6 +64,11 @@ def held_karp(nodes, dist):
     return order[::-1]
 
 
+def constrained(stop):
+    """True si la parada trae hora fija, 'antes de las X' o 'después de las X'."""
+    return any(stop.get(k) is not None for k in ('time', 'before', 'after'))
+
+
 LATE_PENALTY = 20  # cada minuto de retraso sobre la hora pedida pesa como 20 minutos de ruta
 
 
@@ -80,6 +85,10 @@ def objective(order, stops, matrix, start_min):
                 t = want
             else:
                 late += t - want
+        if stops[idx].get('after') is not None and t < stops[idx]['after']:
+            t = stops[idx]['after']
+        if stops[idx].get('before') is not None and t > stops[idx]['before']:
+            late += t - stops[idx]['before']
         t += stops[idx].get('service', 25)
         prev = node
     # Con reloj plano el fin no depende del orden: el traslado desempata y se minimiza igual.
@@ -123,7 +132,7 @@ def solve(stops, matrix, start_min=0):
     if n == 0:
         return [], 'exacto'
     dist = matrix.km
-    if all(s.get('time') is None for s in stops) and n <= EXACT_LIMIT:
+    if not any(constrained(s) for s in stops) and n <= EXACT_LIMIT:
         return [k - 1 for k in held_karp(list(range(1, n + 1)), dist)], 'exacto'
     cost = lambda o: objective(o, stops, matrix, start_min)
     idx = list(range(n))
@@ -133,7 +142,7 @@ def solve(stops, matrix, start_min=0):
         nn.append(nxt)
         left.remove(nxt)
         cur = nxt + 1
-    by_time = sorted(idx, key=lambda i: (stops[i].get('time') is None, stops[i].get('time') or 0))
+    by_time = sorted(idx, key=lambda i: (not constrained(stops[i]), min([v for v in (stops[i].get('time'), stops[i].get('before'), stops[i].get('after')) if v is not None] or [0])))
     starts = [nn, cheapest_insertion([], idx, cost), by_time]
     return min((local_search(s, cost) for s in starts), key=cost), 'heurístico'
 
@@ -163,6 +172,10 @@ def schedule(order, stops, matrix, start_min, tolerance):
                 t = want
             elif t - want > tolerance:
                 late = round(t - want)
+        if stops[idx].get('after') is not None and t < stops[idx]['after']:
+            t = stops[idx]['after']
+        if stops[idx].get('before') is not None and t > stops[idx]['before']:
+            late = round(t - stops[idx]['before'])
         arrive = t
         t += stops[idx].get('service', 25)
         rows.append({'index': idx, 'arrive': round(arrive), 'leave': round(t), 'late': late})

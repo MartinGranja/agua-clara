@@ -22,11 +22,12 @@ const PricingEngine = (() => {
     // No redondear la superficie antes del lookup: un redondeo puede cruzar un límite.
     return {length,width,min,max,depth,area:length*width,volume:length*width*depth,source:'declarada_usuario'};
   }
-  function classify(state, algae) {
+  function classify(state, algae, lastTreatment) {
     if (!Object.hasOwn(config.states,state)) throw new Error('Elegí un estado de agua válido.');
     if (typeof algae !== 'boolean') throw new Error('Indicá si hay algas en las paredes.');
     if (state === 'desconocido') return null;
-    if (state.startsWith('verde_')) return 'recuperacion';
+    // Agua verde: más de 4 meses sin limpieza ni productos = limpieza total; si no, recuperación. Sin respuesta, decide la foto.
+    if (state.startsWith('verde_')) return lastTreatment === 'mas_4' ? 'limpieza_total' : lastTreatment === 'menos_4' ? 'recuperacion' : state === 'verde_oscuro_opaco' ? 'limpieza_total' : 'recuperacion';
     return state === 'turbia' || algae ? 'limpieza_total' : 'mantenimiento';
   }
   function contact(d) {

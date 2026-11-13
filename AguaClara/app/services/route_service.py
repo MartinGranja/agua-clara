@@ -90,7 +90,11 @@ def build_stop(item, clients, rules_service):
         if item['free']:
             parens.append(capitalize_note(item['free']))
         parens += item['paren']
-    return {'name': name, 'item': item, 'client': client, 'zone': item['zone'] or (client or {}).get('zone'), 'time': item['time'], 'service': service, 'coord': coord, 'quality': quality,
+        if item.get('before') is not None:
+            parens.append('Antes de las ' + hhmm(item['before']))
+        if item.get('after') is not None:
+            parens.append('Después de las ' + hhmm(item['after']))
+    return {'name': name, 'item': item, 'client': client, 'zone': item['zone'] or (client or {}).get('zone'), 'time': item['time'], 'before': item.get('before'), 'after': item.get('after'), 'service': service, 'coord': coord, 'quality': quality,
             'team': team_label(item['vehicle'], None), 'written': item['order'], 'parens': parens, 'count': count, 'raw_text': item.get('raw_text')}
 
 
@@ -107,7 +111,7 @@ def apply_cancellations(items, cancels, clients, warnings):
     return kept
 
 
-def plan(text, clients, start='08:30', service=None, plan_date=None, travel=False, teams=2):
+def plan(text, clients, start='08:30', service=None, plan_date=None, travel=False, teams=2, optimize=True, origin_point=None):
     started = time.perf_counter()
     start_min = to_minutes(start)
     service = service or CFG['servicio_min']
@@ -178,22 +182,25 @@ def plan(text, clients, start='08:30', service=None, plan_date=None, travel=Fals
     label_date = plan_date or date.today()
     day_word = parsed['day'] or WEEK[label_date.weekday()]
     day_title = DAY_LABEL.get(day_word, day_word.upper())
-    depot = (CFG['base']['lat'], CFG['base']['lng'])
+    depot = origin_point or (CFG['base']['lat'], CFG['base']['lng'])
     cursor, origin = {}, {}
-    result = {'equipos': [], 'pendientes': pending, 'dia': day_title.capitalize(), 'fecha': label_date.isoformat(), 'salida': start, 'base': CFG['base']['nombre']}
-    totals = {'km': 0.0, 'kmManual': 0.0, 'kmNN': 0.0}
+    result = {'equipos': [], 'pendientes': pending, 'dia': day_title.capitalize(), 'fecha': label_date.isoformat(), 'salida': start, 'base': 'Punto de partida indicado' if origin_point else CFG['base']['nombre'], 'modo': 'optimizado' if optimize else 'mi_orden'}
+    totals = {'km': 0.0, 'kmManual': 0.0, 'kmNN': 0.0, 'kmUsado': 0.0}
     skip_note = [i['client']['name'] if i['client'] else i['name'] for i in skipped]
     for (zone, team), group in blocks.items():
         t0 = cursor.get(team, start_min)
         matrix = eng.Matrix(origin.get(team, depot), [s['coord'] for s in group], CFG['factor_ruta'], CFG['velocidad_kmh'], clock_travel=travel)
         order, method = eng.solve(group, matrix, t0)
         opt = eng.evaluate(order, group, matrix, t0, tol)
-        manual = eng.evaluate(sorted(range(len(group)), key=lambda i: group[i]['written']), group, matrix, t0, tol)
+        manual_order = sorted(range(len(group)), key=lambda i: group[i]['written'])
+        manual = eng.evaluate(manual_order, group, matrix, t0, tol)
         nn = eng.evaluate(eng.nearest_neighbor(matrix, len(group)), group, matrix, t0, tol)
-        cursor[team] = opt['end']
-        origin[team] = group[order[-1]]['coord']
+        # Por defecto se respeta el orden anotado por el dueño; el optimizado se calcula siempre (para comparar) pero solo se usa si se pide.
+        use_order, use = (order, opt) if optimize else (manual_order, manual)
+        cursor[team] = use['end']
+        origin[team] = group[use_order[-1]]['coord']
         rows = []
-        for pos, row in enumerate(opt['rows'], 1):
+        for pos, row in enumerate(use['rows'], 1):
             s = group[row['index']]
             shift = shift_for.get(s['written'], 0)
             c = s['client'] or {}
@@ -201,17 +208,19 @@ def plan(text, clients, start='08:30', service=None, plan_date=None, travel=Fals
                          'detalle': s['parens'], 'texto': s['raw_text'], 'telefono': c.get('phone') or '', 'direccion': c.get('address') or '', 'notasFijas': c.get('notes') or [], 'mapa': maps_link(s['client']),
                          'ubicacion': s['quality'], 'cuenta': s['count'], 'enBase': bool(s['client']), 'corrida': shift})
             if row['late']:
-                warnings.append(f"{s['name']}: no se llega a las {hhmm(s['time'])} (llegaría a las {hhmm(row['arrive'])}).")
+                limit = f"no se llega antes de las {hhmm(s['before'])}" if s.get('before') is not None and s['time'] is None else f"no se llega a las {hhmm(s['time'])}"
+                warnings.append(f"{s['name']}: {limit} (llegaría a las {hhmm(row['arrive'])}).")
         pools = sum(1 for r in rows if r['cuenta'])
         block = {'nombre': f"{zone.upper()} – {team.upper()}" if zone and team else (zone or team or 'SIN ZONA').upper(), 'zona': zone, 'equipo': team, 'metodo': method, 'paradas': rows, 'piletas': pools,
-                 'km': round(opt['km'], 1), 'minutos': round(opt['end'] - t0), 'fin': hhmm(opt['end']), 'kmManual': round(manual['km'], 1), 'kmVecino': round(nn['km'], 1), 'horaFija': any(s['time'] is not None for s in group)}
+                 'km': round(opt['km'], 1), 'kmUsado': round(use['km'], 1), 'minutos': round(use['end'] - t0), 'fin': hhmm(use['end']), 'kmManual': round(manual['km'], 1), 'kmVecino': round(nn['km'], 1), 'horaFija': any(s['time'] is not None or s.get('before') is not None or s.get('after') is not None for s in group)}
         block['mensaje'] = message(block, day_title)
         result['equipos'].append(block)
         totals['km'] += opt['km']
+        totals['kmUsado'] += use['km']
         totals['kmManual'] += manual['km']
         totals['kmNN'] += nn['km']
     saved = totals['kmManual'] - totals['km']
-    result['resumen'] = {'paradas': sum(b['piletas'] for b in result['equipos']), 'bloques': len(result['equipos']), 'pendientes': len(pending), 'noTocan': len(skipped), 'km': round(totals['km'], 1), 'kmManual': round(totals['kmManual'], 1),
+    result['resumen'] = {'paradas': sum(b['piletas'] for b in result['equipos']), 'bloques': len(result['equipos']), 'pendientes': len(pending), 'noTocan': len(skipped), 'km': round(totals['km'], 1), 'kmUsado': round(totals['kmUsado'], 1), 'kmManual': round(totals['kmManual'], 1),
                          'ahorroKm': round(saved, 1), 'ahorroPct': round(100 * saved / totals['kmManual'], 1) if totals['kmManual'] > 0.05 else 0.0}
     result['analitica'] = analytics(result, totals, stops, time.perf_counter() - started)
     result['resumen'].update({k: result['analitica'][k] for k in ('ahorroMin', 'ahorroLitros', 'ahorroPesos')})

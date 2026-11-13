@@ -49,4 +49,7 @@ def certainty_of(quote,analysis):
     score=result['confianza']*(0.9 if quote.get('approximate') else 1)*(0.85 if meta.get('revisionSugerida') else 1)
     reasons=list(meta.get('motivos',[]))
     if quote.get('approximate'): reasons.append('La superficie se aproximó por la forma de la pileta.')
+    if quote.get('serviceBasis')=='foto_sin_confirmar':
+        score*=0.85
+        reasons.append('Con agua verde no se confirmó hace cuánto no se limpia: el servicio (recuperación o limpieza total) se decidió solo por la foto.')
     return {'certainty':'alta' if score>=0.8 else 'media' if score>=0.6 else 'baja','certaintyReasons':reasons,'analysisSummary':summary}

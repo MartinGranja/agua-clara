@@ -11,7 +11,7 @@ from concurrent.futures import ThreadPoolExecutor
 from statistics import mean
 
 from app.schemas import Analysis
-from app.services import cv_baseline
+from app.services import cv_baseline, own_classifier
 from app.services.cv_baseline import SEVERITY
 from app.services.vision_service import VisionUnavailable
 
@@ -130,4 +130,10 @@ def perceive(image, settings, analyze_fn):
             samples.append(analyze_fn(image, settings, 2))
         except VisionUnavailable as exc:
             logger.warning('tiebreak_failed kind=%s', type(exc).__name__)
-    return fuse(samples, cv, round((time.perf_counter() - started) * 1000))
+    fused, meta = fuse(samples, cv, round((time.perf_counter() - started) * 1000))
+    if getattr(settings, 'own_classifier_enabled', True):
+        try:
+            meta['propio'] = own_classifier.predict(image)   # solo se registra para comparar con Gemini en las pruebas de campo
+        except Exception:  # un fallo del clasificador propio nunca debe frenar la cotización
+            logger.warning('own_classifier_failed')
+    return fused, meta

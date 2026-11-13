@@ -25,18 +25,18 @@ const Analytics = (() => {
       rows.map(([name, d, scale = 1, dec = 2]) => '<tr><th scope="row">' + esc(name) + '</th><td>' + d.n + '</td>' + ['mean', 'median', 'min', 'max'].map(k => '<td>' + esc(d[k] == null ? '—' : f(d[k] * scale, dec)) + '</td>').join('') + '</tr>').join('') + '</tbody></table></div>';
   }
 
-  function confusion(rep) {
+  function confusion(rep, name = state) {
     if (!rep || !rep.n) return '';
     const labels = rep.labels, max = Math.max(...rep.confusion.flat(), 1);
-    const head = '<tr><th class="corner">Real ↓ / IA →</th>' + labels.map(l => '<th scope="col">' + esc(state(l)) + '</th>').join('') + '</tr>';
-    const body = rep.confusion.map((row, i) => '<tr><th scope="row">' + esc(state(labels[i])) + '</th>' + row.map((v, j) => '<td class="' + (i === j ? 'diag' : '') + '" style="--a:' + (v / max).toFixed(2) + '">' + (v || '') + '</td>').join('') + '</tr>').join('');
+    const head = '<tr><th class="corner">Real ↓ / IA →</th>' + labels.map(l => '<th scope="col">' + esc(name(l)) + '</th>').join('') + '</tr>';
+    const body = rep.confusion.map((row, i) => '<tr><th scope="row">' + esc(name(labels[i])) + '</th>' + row.map((v, j) => '<td class="' + (i === j ? 'diag' : '') + '" style="--a:' + (v / max).toFixed(2) + '">' + (v || '') + '</td>').join('') + '</tr>').join('');
     return '<div class="table-wrap"><table class="confusion"><thead>' + head + '</thead><tbody>' + body + '</tbody></table></div>';
   }
 
-  function perClass(rep) {
+  function perClass(rep, name = state) {
     if (!rep || !rep.n) return '';
     return '<div class="table-wrap"><table class="an-table"><thead><tr><th>Clase</th><th>Precisión</th><th>Sensibilidad</th><th>F1</th><th>Casos</th></tr></thead><tbody>' +
-      Object.entries(rep.classes).map(([k, c]) => '<tr><th scope="row">' + esc(state(k)) + '</th><td>' + pct(c.precision) + '</td><td>' + pct(c.recall) + '</td><td>' + pct(c.f1) + '</td><td>' + c.support + '</td></tr>').join('') + '</tbody></table></div>';
+      Object.entries(rep.classes).map(([k, c]) => '<tr><th scope="row">' + esc(name(k)) + '</th><td>' + pct(c.precision) + '</td><td>' + pct(c.recall) + '</td><td>' + pct(c.f1) + '</td><td>' + c.support + '</td></tr>').join('') + '</tbody></table></div>';
   }
 
   function line(series, key, color) {
@@ -67,14 +67,15 @@ const Analytics = (() => {
       'Medidas descriptivas sobre todas las fotos y consultas guardadas.');
     // Exactitud contra el estado real cargado por el dueño
     if (!x.etiquetadas) {
-      html += block('Exactitud de la IA (accuracy, F1, matriz de confusión)', '<div class="empty small"><p>Todavía no hay consultas con el estado real cargado. Abrí una consulta en el panel, mirá la pileta en la visita y completá «Estado real». Con ' + x.minimoRecomendado + ' o más (0 de ' + x.minimoRecomendado + ' hasta ahora) las métricas son confiables para el informe.</p></div>');
+      html += block('Exactitud de la IA (accuracy, F1, matriz de confusión)', '<div class="empty small"><p>Todavía no hay consultas con el estado real cargado. Abrí una consulta en el panel, mirá la pileta en la visita y completá «Servicio real». Con ' + x.minimoRecomendado + ' o más (0 de ' + x.minimoRecomendado + ' hasta ahora) las métricas son confiables para el informe.</p></div>');
     } else {
-      const w = x.estadoAgua, cvr = x.estadoAguaVisionClasica, o = x.estadoAguaOrdinal;
-      html += block('Exactitud de la IA contra el estado real', '<div class="stats">' + kpi(pct(w.accuracy), 'Accuracy · estado del agua', 'n = ' + w.n) + kpi(pct(w.macroF1), 'F1 macro', 'ponderado ' + pct(w.weightedF1)) + kpi(pct(o.withinOne), 'Acierto con un escalón de margen', 'error medio ' + f(o.meanGap, 2) + ' escalones') +
-        kpi(pct(x.algas.f1), 'F1 · algas en paredes', 'precisión ' + pct(x.algas.precision, 0) + ' · sensibilidad ' + pct(x.algas.recall, 0)) + kpi(pct(x.forma.accuracy), 'Accuracy · forma de la pileta', 'n = ' + x.forma.n) + kpi(pct(x.servicio.accuracy), 'Accuracy · servicio sugerido', 'macro F1 ' + pct(x.servicio.macroF1)) + '</div>' +
-        (x.etiquetadas < x.minimoRecomendado ? '<p class="review-error">Con ' + x.etiquetadas + ' casos etiquetados las cifras son orientativas; el mínimo recomendado es ' + x.minimoRecomendado + '.</p>' : '') +
-        '<h3>Matriz de confusión · estado del agua</h3>' + confusion(w) + '<h3>Por clase</h3>' + perClass(w) +
-        '<h3>Comparación con visión por color (baseline)</h3><p>' + (cvr.n ? 'La visión por color sola acierta ' + pct(cvr.accuracy) + ' (F1 macro ' + pct(cvr.macroF1) + ', n = ' + cvr.n + '), contra ' + pct(w.accuracy) + ' de la IA combinada.' : 'La visión por color no pudo evaluar ninguna foto etiquetada.') + '</p>');
+      const sv = x.servicio, svc = x.servicioVisionClasica, w = x.estadoAgua, cvr = x.estadoAguaVisionClasica, o = x.estadoAguaOrdinal;
+      html += block('Exactitud del servicio sugerido contra el servicio real', '<div class="stats">' + kpi(pct(sv.accuracy), 'Accuracy · servicio', 'n = ' + sv.n) + kpi(pct(sv.macroF1), 'F1 macro', 'ponderado ' + pct(sv.weightedF1)) +
+        kpi(pct(svc.accuracy), 'Accuracy solo con visión por color', 'baseline · n = ' + svc.n) + kpi(pct(x.forma.accuracy), 'Accuracy · forma de la pileta', 'n = ' + x.forma.n) + kpi(pct(x.algas.f1), 'F1 · algas en paredes', 'n = ' + x.algas.n) + '</div>' +
+        (x.etiquetadas < x.minimoRecomendado ? '<p class="review-error">Con ' + x.etiquetadas + (x.etiquetadas === 1 ? ' caso etiquetado' : ' casos etiquetados') + ' las cifras son orientativas; el mínimo recomendado es ' + x.minimoRecomendado + '.</p>' : '') +
+        '<h3>Matriz de confusión · servicio</h3>' + confusion(sv, SERVICE) + '<h3>Por clase</h3>' + perClass(sv, SERVICE) +
+        '<p>' + (svc.n ? 'La visión por color sola acierta el servicio en ' + pct(svc.accuracy) + ' (F1 macro ' + pct(svc.macroF1) + '), contra ' + pct(sv.accuracy) + ' del sistema combinado.' : 'La visión por color no pudo evaluar ninguna foto etiquetada.') + '</p>');
+      if (w.n) html += block('Estado del agua (solo consultas donde se cargó el estado real)', '<div class="stats">' + kpi(pct(w.accuracy), 'Accuracy · estado del agua', 'n = ' + w.n) + kpi(pct(w.macroF1), 'F1 macro', 'ponderado ' + pct(w.weightedF1)) + kpi(pct(o.withinOne), 'Acierto con un escalón de margen', 'error medio ' + f(o.meanGap, 2)) + kpi(pct(cvr.accuracy), 'Visión por color sola', 'n = ' + cvr.n) + '</div>' + confusion(w) + perClass(w));
     }
     html += block('Error del presupuesto automático', p.conPrecioRevisado ? '<div class="stats">' + kpi(money(p.error.mae), 'Error absoluto medio (MAE)', 'n = ' + p.error.n) + kpi(pc(p.error.mape, 1), 'Error porcentual medio (MAPE)') + kpi(money(p.error.bias), 'Sesgo (estimado − revisado)') + kpi(money(p.error.rmse), 'RMSE') + kpi(pc(p.ajustadasPct, 0), 'Precios que el dueño corrigió') + '</div>' : '<div class="empty small"><p>Se calcula cuando el dueño guarda un importe revisado en una consulta: se compara el precio automático contra el que finalmente cobra.</p></div>',
       'Compara la precotización del sistema con el importe que el dueño confirmó después de la visita.');

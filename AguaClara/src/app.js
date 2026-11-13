@@ -35,7 +35,7 @@ const UI = (() => {
 
   const ready=api('/api/config').then(config=>Object.assign(AC_CONFIG,config));
 
-  function clean(d){return Object.fromEntries(['shape','poolShape','unknown','unknownDepth','length','width','depthType','depthMin','depthMax','water','algae','zone','name','phone','day','photoName','photoOrigin','analysisId','measurementsConfirmed'].filter(k=>d[k]!==undefined).map(k=>[k,d[k]]));}
+  function clean(d){return Object.fromEntries(['shape','poolShape','unknown','unknownDepth','length','width','depthType','depthMin','depthMax','water','algae','zone','name','phone','day','photoName','photoOrigin','analysisId','measurementsConfirmed','lastTreatment'].filter(k=>d[k]!==undefined).map(k=>[k,d[k]]));}
 
   function quote(d){return api('/api/quotes',{method:'POST',body:JSON.stringify(clean(d))});}
 
@@ -52,7 +52,7 @@ const UI = (() => {
 
     'Cliente: '+(d.name||'Pendiente')+'\nTeléfono: '+(d.phone||'Pendiente')+'\nLocalidad: '+(d.zone||'Pendiente')+'\nDía preferido: '+(d.day||'A coordinar')+'\n'+
 
-    'Estado del agua: '+(AC_CONFIG.states[d.water]||'A confirmar')+'\nAlgas en paredes: '+(d.algae?'Sí':'No')+'\nServicio sugerido: '+(AC_CONFIG.services[q.service]||'A evaluar')+'\n'+
+    'Estado del agua: '+(AC_CONFIG.states[d.water]||'A confirmar')+'\nAlgas en paredes: '+(d.algae?'Sí':'No')+'\nServicio sugerido: '+(AC_CONFIG.services[q.service]||'A evaluar')+'\n'+(d.lastTreatment?'Tiempo sin limpieza ni productos: '+({menos_4:'menos de 4 meses',mas_4:'más de 4 meses',no_se:'no sabe'}[d.lastTreatment])+'\n':'')+
 
     'Superficie: '+(dims.area===null?'A confirmar':num(dims.area)+' m²'+(dims.source==='aproximada_por_forma'?' (aproximada, forma '+String(dims.shape).replace('_',' ')+')':''))+'\nVolumen aproximado: '+(dims.volume===null?'A confirmar':num(dims.volume)+' m³ · '+num(dims.volume*1000)+' L')+'\n'+
 
@@ -87,18 +87,19 @@ const UI = (() => {
     return box;
   }
   function validationForm(id,ev){
-    const a=ev.analysis&&ev.analysis.result,v=ev.validation||{};
+    const v=ev.validation||{};
     const f=document.createElement('form');f.className='validation edit-area';
     const water=Object.keys(AC_CONFIG.states).filter(k=>k!=='desconocido'),shapes=[...Object.keys(AC_CONFIG.shapes||{}),'indeterminado'];
     const opt=(list,sel,lab)=>list.map(k=>'<option value="'+esc(k)+'"'+(k===sel?' selected':'')+'>'+esc(lab(k))+'</option>').join('');
-    const algae=v.algae??(a&&a.presencia_algas_paredes);
-    f.innerHTML='<h3>Estado real (para medir el acierto de la IA)</h3><p class="help">Completalo después de ver la pileta en persona. Con 30 o más consultas etiquetadas el panel de Analíticas calcula accuracy, F1 y la matriz de confusión.</p>'+
-      '<label>Estado real del agua<select name="water">'+opt(water,v.water||(a&&a.estado_agua),k=>AC_CONFIG.states[k])+'</select></label>'+
-      '<label>Algas en paredes<select name="algae"><option value="false"'+(algae?'':' selected')+'>No</option><option value="true"'+(algae?' selected':'')+'>Sí</option></select></label>'+
-      '<label>Forma real<select name="shape">'+opt(shapes,v.shape||(a&&a.tipo_pileta)||'rectangular',k=>k==='indeterminado'?'Indeterminada':SHAPE_LABEL(k))+'</select></label>'+
-      '<label>Nota (opcional)<input name="note" maxlength="300" value="'+esc(v.note||'')+'"></label><button class="primary">'+(v.at?'Actualizar estado real':'Guardar estado real')+'</button><p class="review-error" role="alert"></p>';
-    f.onsubmit=async e=>{e.preventDefault();const b=f.querySelector('button');b.disabled=true;
-      try{await api('/api/admin/requests/'+id+'/validation',{method:'PATCH',body:JSON.stringify({water:f.elements.water.value,algae:f.elements.algae.value==='true',shape:f.elements.shape.value,note:f.elements.note.value.trim()})});b.textContent='Actualizar estado real';toast('Estado real guardado.');}
+    const services=Object.keys(AC_CONFIG.services||{});
+    f.innerHTML='<h3>Servicio real (para medir el acierto de la IA)</h3><p class="help">Completalo después de ver la pileta en persona. Con 30 o más consultas etiquetadas el panel de Analíticas calcula accuracy, F1 y la matriz de confusión. Solo el servicio es obligatorio.</p>'+
+      '<label>Servicio que correspondía<select name="service" required><option value="">Elegí una opción</option>'+opt(services,v.service,k=>AC_CONFIG.services[k])+'</select></label>'+
+      '<label>Estado real del agua (si lo sabés)<select name="water"><option value="">No lo sé</option>'+opt(water,v.water,k=>AC_CONFIG.states[k])+'</select></label>'+
+      '<label>Algas en paredes (si lo sabés)<select name="algae"><option value="">No lo sé</option><option value="false"'+(v.algae===false?' selected':'')+'>No</option><option value="true"'+(v.algae===true?' selected':'')+'>Sí</option></select></label>'+
+      '<label>Forma real<select name="shape">'+opt(shapes,v.shape||'indeterminado',k=>k==='indeterminado'?'No lo sé':SHAPE_LABEL(k))+'</select></label>'+
+      '<label>Nota (opcional)<input name="note" maxlength="300" value="'+esc(v.note||'')+'"></label><button class="primary">'+(v.at?'Actualizar':'Guardar')+'</button><p class="review-error" role="alert"></p>';
+    f.onsubmit=async e=>{e.preventDefault();const b=f.querySelector('button');b.disabled=true;f.querySelector('.review-error').textContent='';
+      try{const el=f.elements;await api('/api/admin/requests/'+id+'/validation',{method:'PATCH',body:JSON.stringify({service:el.service.value||null,water:el.water.value||null,algae:el.algae.value===''?null:el.algae.value==='true',shape:el.shape.value,note:el.note.value.trim()})});b.textContent='Actualizar';toast('Servicio real guardado.');}
       catch(err){f.querySelector('.review-error').textContent=err.message;}finally{b.disabled=false;}};
     return f;
   }

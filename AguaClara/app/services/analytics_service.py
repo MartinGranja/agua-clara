@@ -10,13 +10,12 @@ from datetime import datetime
 
 from app.services import metrics as m
 from app.services.cv_baseline import SEVERITY, STATES
+from app.services.pricing_engine import service_for
 
 
 def service_of(water, algae):
-    """Misma regla del presupuesto: de estado del agua y algas a servicio."""
-    if water in (None, 'desconocido'):
-        return None
-    return 'recuperacion' if water.startswith('verde_') else 'limpieza_total' if water == 'turbia' or algae else 'mantenimiento'
+    """Servicio que sale solo de la foto (sin la pregunta de tiempo sin tratamiento): misma regla que el presupuesto."""
+    return service_for(water, algae, None)[0]
 
 
 def _seconds(conversation):
@@ -54,18 +53,29 @@ def consultas(requests, analyses):
     # --- Exactitud contra la verdad de terreno cargada por el dueño ---
     labeled = [(r, by_id.get(r['data'].get('analysisId'))) for r in requests if r.get('validation')]
     labeled = [(r, a) for r, a in labeled if a]
-    water_pairs = [(r['validation']['water'], a['result']['estado_agua']) for r, a in labeled]
-    cv_pairs = [(r['validation']['water'], (a.get('meta') or {}).get('cv', {}).get('estado_agua')) for r, a in labeled if (a.get('meta') or {}).get('cv', {}).get('es_pileta')]
-    service_pairs = [(service_of(r['validation']['water'], r['validation']['algae']), r['quote'].get('service')) for r, a in labeled]
-    shape_pairs = [(r['validation']['shape'], a['result']['tipo_pileta']) for r, a in labeled]
+    def truth_service(v):
+        return v.get('service') or service_of(v.get('water'), v.get('algae'))
+
+    def cv_of(a):
+        cv = (a.get('meta') or {}).get('cv') or {}
+        return cv.get('estado_agua') if cv.get('es_pileta') else None
+
+    water_pairs = [(r['validation']['water'], a['result']['estado_agua']) for r, a in labeled if r['validation'].get('water')]
+    cv_pairs = [(r['validation']['water'], cv_of(a)) for r, a in labeled if r['validation'].get('water') and cv_of(a)]
+    service_pairs = [(truth_service(r['validation']), r['quote'].get('service')) for r, a in labeled if truth_service(r['validation'])]
+    service_cv_pairs = [(truth_service(r['validation']), service_of(cv_of(a), False)) for r, a in labeled if truth_service(r['validation']) and cv_of(a)]
+    algae_pairs = [(r['validation']['algae'], a['result']['presencia_algas_paredes']) for r, a in labeled if r['validation'].get('algae') is not None]
+    shape_pairs = [(r['validation']['shape'], a['result']['tipo_pileta']) for r, a in labeled if r['validation'].get('shape') not in (None, 'indeterminado')]
+    service_labels = ['mantenimiento', 'limpieza_total', 'recuperacion']
     water_labels = [s for s in STATES if any(s in p for p in water_pairs + cv_pairs)]
     reviewed = [(r['review']['price'], r['quote']['price']) for r in requests if r.get('review') and r['review'].get('price') is not None and r['quote'].get('price') is not None]
     out['exactitud'] = {
         'etiquetadas': len(labeled), 'sinEtiquetar': len(requests) - len(labeled),
         'estadoAgua': m.classification_report(water_pairs, water_labels), 'estadoAguaOrdinal': m.ordinal_report(water_pairs, SEVERITY),
         'estadoAguaVisionClasica': m.classification_report(cv_pairs, water_labels),
-        'algas': m.binary_report([(r['validation']['algae'], a['result']['presencia_algas_paredes']) for r, a in labeled]),
-        'forma': m.classification_report(shape_pairs), 'servicio': m.classification_report(service_pairs),
+        'algas': m.binary_report(algae_pairs),
+        'forma': m.classification_report(shape_pairs), 'servicio': m.classification_report(service_pairs, service_labels),
+        'servicioVisionClasica': m.classification_report(service_cv_pairs, service_labels),
         'minimoRecomendado': 30,
     }
     out['presupuesto'] = {'conPrecioRevisado': len(reviewed), 'error': m.regression_report([(real, est) for real, est in reviewed]),
@@ -139,7 +149,7 @@ def analysis_csv(requests, analyses):
         w.writerow([a['id'], (r or {}).get('id', ''), (r or {}).get('createdAt', ''), res.get('es_pileta'), res.get('estado_agua'), res.get('presencia_algas_paredes'), res.get('tipo_pileta'), res.get('confianza'),
                     meta.get('acuerdoModelo'), (meta.get('cv') or {}).get('estado_agua'), meta.get('acuerdoCV'), meta.get('muestras'), res.get('calidad_foto'), res.get('indice_turbidez'), res.get('intensidad_verde'),
                     meta.get('latenciaMs'), meta.get('revisionSugerida'), val.get('water', ''), val.get('algae', ''), val.get('shape', ''), ((r or {}).get('quote') or {}).get('service', ''),
-                    service_of(val.get('water'), val.get('algae')) or '', ((r or {}).get('quote') or {}).get('price', ''), ((r or {}).get('review') or {}).get('price', ''), ((r or {}).get('quote') or {}).get('certainty', '')])
+                    val.get('service') or service_of(val.get('water'), val.get('algae')) or '', ((r or {}).get('quote') or {}).get('price', ''), ((r or {}).get('review') or {}).get('price', ''), ((r or {}).get('quote') or {}).get('certainty', '')])
     return out.getvalue()
 
 

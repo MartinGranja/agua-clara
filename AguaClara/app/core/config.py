@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     # Visión híbrida: lecturas independientes por foto (1 a 3; 1 ahorra cuota de Gemini) y detector de color de respaldo.
     vision_samples: int = 2
     cv_enabled: bool = True
+    own_classifier_enabled: bool = True   # segunda lectura con el clasificador propio (solo se registra en meta; no cambia el presupuesto)
     database_url: str = 'sqlite:///./data/aguaclara.db'
     admin_token: str = ''
     allow_remote: bool = False

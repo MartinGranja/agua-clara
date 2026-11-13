@@ -28,6 +28,7 @@ TARGETS={
  'depth':'Pedí la profundidad en metros.',
  'depthMin':'Pedí la profundidad de la parte más baja (menos profunda), en metros.',
  'depthMax':'Pedí la profundidad de la parte más honda, en metros.',
+ 'treatment':'Explicá en una frase que el agua se ve verde y preguntá hace cuánto tiempo no se limpia la pileta ni se le aplican productos (más o menos de 4 meses). Si no sabe, puede decir que no sabe.',
  'zone':'Preguntá en qué localidad está la pileta.',
  'name':'Pedí el nombre para identificar la consulta.',
  'phone':'Pedí un teléfono de contacto con código de área.',

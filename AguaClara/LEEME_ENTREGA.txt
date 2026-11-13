@@ -1,3 +1,18 @@
+NOVEDAD v6e: RECORRIDOS
+- El recorrido se optimiza por distancia por defecto; casilla «Respetar el orden en que anotaste» para no optimizar.
+- Campo «Punto de partida» (link de Maps con coordenadas o lat,lng); vacío = base de app/data/ruteo.yaml.
+- Reglas de horario por encima de la distancia: «antes de las 14», «después de las 11», hora fija «13:30».
+- Botón «Obtener coordenadas de links cortos» en Base de clientes (maps.app.goo.gl). Si alguno no se resuelve,
+  agregar columnas Latitud y Longitud al CSV o reemplazar el link por https://maps.google.com/?q=lat,lng
+- Pruebas: 219.
+
+NOVEDAD v6c: pregunta «¿hace cuánto no se limpia ni se le ponen productos?»
+- Cuando el agua se ve verde, el chat pregunta el tiempo sin limpieza ni productos (botones «Menos de 4 meses», «Más de 4 meses», «No sé», o texto libre como «hace 6 meses»).
+- Regla: más de 4 meses = limpieza total; menos de 4 meses = recuperación. Sin respuesta («No sé»), decide la foto: verde oscuro y opaco = limpieza total, el resto del verde = recuperación, y la certeza baja un nivel.
+- Con agua no verde la regla no cambia (turbia o con algas = limpieza total; si no, mantenimiento).
+- scripts/evaluar_fotos.py suma dos tablas: «¿necesita tratamiento?» (mantenimiento vs recuperación/limpieza total) y «sistema + pregunta», que supone que el cliente responde bien (cota superior).
+- 210 pruebas automatizadas aprobadas.
+
 ﻿AGUA CLARA — ENTREGA PARA CONTINUAR EL DESARROLLO
 Actualización: noviembre de 2026 (v6: IA híbrida, texto libre, analíticas y recorrido con métricas)
 
@@ -129,3 +144,9 @@ sobre Vercel; el precio de recuperación de 80 m² se verificó en producción.
 Los registros previos conservan su cotización original y revisión manual.
 No se incluyen claves, consultas, fotos de clientes, base de datos ni entorno virtual.
 No se modificaron tarjetas de Trello ni documentos de Drive con esta entrega.
+
+
+NOVEDAD v6f - Clasificador propio
+  Nuevo: app/services/own_classifier.py, app/data/clasificador_propio.json, scripts/entrenar_clasificador.py, tests/test_own_classifier.py, docs/CLASIFICADOR_PROPIO.md.
+  Cada consulta registra además la lectura del clasificador propio (meta.propio), sin cambiar el presupuesto. evaluar_fotos.py acepta --propio.
+  Para reentrenar: pip install scikit-learn y ver docs/CLASIFICADOR_PROPIO.md.

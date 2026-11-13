@@ -24,7 +24,8 @@
   function render(r) {
     last = r;
     const s = r.resumen;
-    const stats = [[s.paradas, 'Piletas en el recorrido'], [km(s.km) + ' km', 'Recorrido optimizado'], [km(s.kmManual) + ' km', 'Orden en que las anotaste'], [s.ahorroPct + '%', 'Menos kilómetros']];
+    const mine = r.modo === 'mi_orden';
+    const stats = mine ? [[s.paradas, 'Piletas en el recorrido'], [km(s.kmUsado) + ' km', 'Tu orden (el del mensaje)'], [km(s.km) + ' km', 'Si usaras el orden optimizado'], [s.ahorroPct + '%', 'Menos km con el optimizado']] : [[s.paradas, 'Piletas en el recorrido'], [km(s.km) + ' km', 'Recorrido optimizado'], [km(s.kmManual) + ' km', 'Orden en que las anotaste'], [s.ahorroPct + '%', 'Menos kilómetros']];
     let html = '<div class="stats">' + stats.map(([n, l]) => '<div class="stat"><b>' + esc(n) + '</b><span>' + esc(l) + '</span></div>').join('') + '</div>';
     html += analysisHtml(r.analitica);
     if (r.pendientes.length) html += '<div class="route-notes pending" role="alert"><b>A confirmar antes de salir (' + r.pendientes.length + ')</b><ul>' + r.pendientes.map(p => '<li>«' + esc(p.texto) + '» — ' + esc(p.motivo) + (p.opciones.length ? '. ¿Será ' + p.opciones.map(esc).join(' o ') + '?' : '') + '</li>').join('') + '</ul></div>';
@@ -33,7 +34,7 @@
     html += r.equipos.map((t, i) => {
       if (!t.paradas.length) return '<article class="team"><div class="team-head"><h2>' + esc(t.nombre) + '</h2><span>Sin paradas</span></div></article>';
       const rows = t.paradas.map(p => '<li class="' + (p.retraso ? 'late' : '') + '"><b class="n">' + p.orden + '</b><div><b>' + esc(p.texto || p.cliente) + '</b>' + (p.texto ? ' <small>' + esc(p.cliente) + '</small>' : '') + (!p.enBase ? '<span class="tag">FALTA en la base</span>' : p.ubicacion === 'aproximada' ? '<span class="tag">ubicación aproximada</span>' : '') + (p.detalle.length ? '<small>' + p.detalle.map(esc).join(' · ') + '</small>' : '') + (p.direccion ? '<small>' + esc(p.direccion) + '</small>' : '') + (p.mapa ? '<small><a href="' + esc(p.mapa) + '" target="_blank" rel="noopener noreferrer">Abrir en el mapa</a></small>' : '') + '</div><div class="time">' + esc(p.llegada) + (p.horaPedida ? '<small>pedida ' + esc(p.horaPedida) + '</small>' : '') + (p.corrida ? '<small>corrida −' + p.corrida + ' min</small>' : '') + '</div></li>').join('');
-      return '<article class="team"><div class="team-head"><h2>' + esc(t.nombre) + '</h2><span>' + t.piletas + ' piletas · ' + km(t.km) + ' km · termina ~' + esc(t.fin) + ' (' + hm(t.minutos) + ') · método ' + esc(t.metodo) + '</span></div><ol>' + rows + '</ol><pre class="message-box">' + esc(t.mensaje) + '</pre><div class="route-buttons"><button type="button" data-copy="' + i + '">Copiar mensaje</button><a class="button" target="_blank" rel="noopener noreferrer" href="https://wa.me/?text=' + encodeURIComponent(t.mensaje) + '">Abrir en WhatsApp</a></div></article>';
+      return '<article class="team"><div class="team-head"><h2>' + esc(t.nombre) + '</h2><span>' + t.piletas + ' piletas · ' + km(t.kmUsado ?? t.km) + ' km · termina ~' + esc(t.fin) + ' (' + hm(t.minutos) + ') · método ' + esc(t.metodo) + '</span></div><ol>' + rows + '</ol><pre class="message-box">' + esc(t.mensaje) + '</pre><div class="route-buttons"><button type="button" data-copy="' + i + '">Copiar mensaje</button><a class="button" target="_blank" rel="noopener noreferrer" href="https://wa.me/?text=' + encodeURIComponent(t.mensaje) + '">Abrir en WhatsApp</a></div></article>';
     }).join('');
     html += '<p class="lead">' + esc(r.supuestos) + (r.id ? ' Recorrido guardado.' : '') + '</p><div class="route-buttons"><button type="button" id="route-export" class="quiet">Exportar resultado</button></div>';
     $('route-result').innerHTML = html;
@@ -47,7 +48,7 @@
     const button = $('route-go');
     button.disabled = true; button.textContent = 'Armando…';
     try {
-      const r = await api('/api/admin/route/plan', {method: 'POST', body: JSON.stringify({lista: $('route-list').value, fecha: $('route-date').value || null, inicio: $('route-start').value || '08:30', servicio: Number($('route-service').value) || 30, traslado: $('route-travel').checked, guardar: $('route-save').checked})});
+      const r = await api('/api/admin/route/plan', {method: 'POST', body: JSON.stringify({lista: $('route-list').value, fecha: $('route-date').value || null, inicio: $('route-start').value || '08:30', servicio: Number($('route-service').value) || 30, traslado: $('route-travel').checked, guardar: $('route-save').checked, optimizar: !$('route-keep').checked, origen: $('route-origin').value.trim()})});
       render(r);
       if (r.id) loadHistory();
     } catch (err) { fail(err); }
@@ -90,6 +91,12 @@
   };
   $('route-csv-file').onchange = async e => { const f = e.target.files[0]; if (f) { if (f.size > 400000) { $('route-import-msg').textContent = 'El archivo es demasiado grande.'; return; } $('route-csv').value = await f.text(); } };
   $('route-import').onclick = importClients;
+  $('route-resolve').onclick = async () => {
+    const msg = $('route-import-msg'), b = $('route-resolve'); msg.textContent = 'Consultando los links…'; b.disabled = true;
+    try { const r = await api('/api/admin/clients/resolve-links', {method: 'POST'}); msg.textContent = 'Se obtuvieron las coordenadas de ' + r.resueltos + ' clientes.' + (r.sinCoordenadas.length ? ' Sin coordenadas: ' + r.sinCoordenadas.join(', ') + '.' : ''); loadClients(); }
+    catch (err) { msg.textContent = err.message; if (err.status === 401) fail(err); }
+    finally { b.disabled = false; }
+  };
   $('route-demo').onclick = async () => { try { await api('/api/admin/clients', {method: 'DELETE'}); $('route-import-msg').textContent = 'Se volvió a la base de demostración.'; loadClients(); } catch (err) { fail(err); } };
   document.querySelector('[data-view="route"]').addEventListener('click', () => { loadClients(); loadHistory(); });
 })();
