@@ -83,7 +83,7 @@ def fuse(samples, cv, latency_ms=0):
     if cv and cv['es_pileta'] and water != 'desconocido':
         gap = abs(SEVERITY[water] - SEVERITY[cv['estado_agua']])
         cv_agreement = 1.0 if gap <= 1 else 0.5 if gap == 2 else 0.0
-        cv_factor = 1.0 if gap <= 1 else 0.85 if gap == 2 else 0.7
+        cv_factor = 1.0 if gap <= 1 else 0.925 if gap == 2 else 0.85   # el color es la señal más débil (exactitud 0,47 en 90 fotos): no debe hundir lecturas correctas
     elif cv and not cv['es_pileta']:
         cv_factor = 0.95   # el detector de color no encontró agua: poca señal en contra, pero no se ignora
     confidence = mean(s.confianza for s in live) * (0.55 + 0.45 * model_agreement) * cv_factor * QUALITY[quality]
@@ -91,7 +91,7 @@ def fuse(samples, cv, latency_ms=0):
     reasons = []
     if model_agreement < 0.8:
         reasons.append('Las lecturas de la foto no coinciden del todo.')
-    if cv_agreement is not None and cv_agreement < 1.0:
+    if cv_agreement is not None and cv_agreement < 1.0 and confidence < REVIEW_BELOW:   # solo si además baja la confianza: el color por sí solo acierta menos de la mitad
         reasons.append('El detector de color ve el agua distinta a la lectura principal.')
     if quality != 'buena':
         reasons.append('La calidad de la foto no es buena.')

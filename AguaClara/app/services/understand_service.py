@@ -9,6 +9,7 @@ El precio NUNCA lo fija este módulo; se calcula en pricing_engine.
 """
 import json
 import logging
+import html
 import re
 import unicodedata
 
@@ -28,7 +29,7 @@ Devolvé null en todo lo que el mensaje no diga con claridad; no inventes ni ded
 Medidas en metros como número (coma decimal = punto). "7 por 4" o "7x4": largo=7, ancho=4. Si dice diámetro,
 largo y ancho valen el diámetro. profundidad_tipo=variable solo si da dos profundidades distintas (o dice que cambia);
 uniforme si da una sola o dice que es pareja; con una sola profundidad completá solo profundidad_min.
-Si el paso actual es de profundidad y el cliente escribe solo un número, es una profundidad.
+Si el paso actual es de profundidad y el cliente escribe solo un número, es una profundidad. En los pasos profundidad_min y profundidad_max no cambies el tipo de profundidad.
 localidad: el nombre del lugar donde está la pileta. nombre: cómo se llama el cliente. telefono: tal cual lo escribió.
 dia: Lunes a Sábado o "A coordinar".
 intencion: datos (aporta datos), pregunta (consulta algo), correccion (quiere cambiar un dato ya dado), saludo u otro.
@@ -206,12 +207,14 @@ def understand(text, step, shape, settings):
             model, _ = sanitize({'length': u.largo, 'width': u.ancho, 'depthType': u.profundidad_tipo, 'depthMin': u.profundidad_min,
                                  'depthMax': u.profundidad_max, 'zone': u.localidad, 'name': u.nombre, 'phone': u.telefono, 'day': u.dia})
             source, intent = 'gemini', u.intencion
-            reply = (u.respuesta or '').strip() or None
+            reply = html.unescape((u.respuesta or '').strip()) or None
         except Exception as exc:   # solo el tipo: nunca el cuerpo ni datos del cliente
             logger.warning('understand_failed kind=%s', type(exc).__name__)
     fields = {**rules, **model}
     if 'depthMin' in fields and 'depthMax' in fields:
         fields, _ = sanitize(fields)   # recalcula tipo uniforme/variable si se mezclaron fuentes
+    if step in ('depthMin', 'depthMax') and not ('depthMin' in fields and 'depthMax' in fields):
+        fields.pop('depthType', None)   # con una sola cifra en estos pasos el cliente ya dijo que es variable: no se vuelve «uniforme»
     intent = intent or _intent(text, fields)
     if fields and intent in ('pregunta', 'saludo', 'otro'):
         intent = 'datos'

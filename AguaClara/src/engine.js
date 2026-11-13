@@ -22,10 +22,12 @@ const PricingEngine = (() => {
     // No redondear la superficie antes del lookup: un redondeo puede cruzar un límite.
     return {length,width,min,max,depth,area:length*width,volume:length*width*depth,source:'declarada_usuario'};
   }
-  function classify(state, algae, lastTreatment) {
+  function needsBottom(state, algae) { return ['cristalina','levemente_turbia','verde_leve'].includes(state) && (algae === true || state === 'levemente_turbia' || state === 'verde_leve'); }
+  function classify(state, algae, lastTreatment, bottomVisible) {
     if (!Object.hasOwn(config.states,state)) throw new Error('Elegí un estado de agua válido.');
     if (typeof algae !== 'boolean') throw new Error('Indicá si hay algas en las paredes.');
     if (state === 'desconocido') return null;
+    if (bottomVisible === 'si' && needsBottom(state, algae)) return 'mantenimiento';
     // Agua verde: más de 4 meses sin limpieza ni productos = limpieza total; si no, recuperación. Sin respuesta, decide la foto.
     if (state.startsWith('verde_')) return lastTreatment === 'mas_4' ? 'limpieza_total' : lastTreatment === 'menos_4' ? 'recuperacion' : state === 'verde_oscuro_opaco' ? 'limpieza_total' : 'recuperacion';
     return state === 'turbia' || algae ? 'limpieza_total' : 'mantenimiento';
@@ -36,6 +38,6 @@ const PricingEngine = (() => {
     if (!['A coordinar','Lunes','Martes','Miércoles','Jueves','Viernes','Sábado'].includes(d.day)) throw new Error('Elegí una preferencia de día.');
     return true;
   }
-  return {number,dimensions,classify,contact};
+  return {number,dimensions,classify,needsBottom,contact};
 })();
 if (typeof module !== 'undefined') module.exports = PricingEngine;

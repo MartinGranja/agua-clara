@@ -42,7 +42,8 @@
     if(data.depthMin==null)return data.depthType==='uniforme'?'depth':'depthMin';
     if(data.depthType==='variable'&&data.depthMax==null)return 'depthMax';
     if(!data.measurementsConfirmed)return 'measuresReview';
-    if(needsTreatment()&&!data.lastTreatment)return 'treatment';
+    if(needsBottom()&&!data.bottomVisible)return 'bottom';
+    if(needsTreatment()&&data.bottomVisible!=='si'&&!data.lastTreatment)return 'treatment';
     if(!data.zone)return 'zone';
     if(!data.name)return 'name';
     if(!data.phone)return 'phone';
@@ -50,6 +51,12 @@
     return 'review';
   }
   const needsTreatment=()=>typeof data.water==='string'&&data.water.startsWith('verde_');
+  const needsBottom=()=>typeof data.water==='string'&&PricingEngine.needsBottom(data.water,data.algae===true);
+  function parseBottom(t){
+    if(/^(si|sí)\b|se ve (claro|claramente|bien)|\bclaramente\b/.test(t)&&!/\bno se ve\b|\bno\b/.test(t))return 'si';
+    if(/\bno\b|no se ve|turbia|verde|oscur|nada/.test(t))return 'no';
+    return null;
+  }
   // Respuesta a «¿hace cuánto no se limpia ni se le ponen productos?»: botones o texto libre («hace 6 meses», «un año»).
   function parseTreatment(t){
     if(t==='menos de 4 meses')return 'menos_4';
@@ -67,7 +74,7 @@
     if(state==='depthMax'&&f.depthMax==null&&f.depthMin!=null&&f.depthType!=='uniforme'){f.depthMax=f.depthMin;delete f.depthMin;}
     if(f.depthMin!=null||f.depthMax!=null||f.depthType){
       data.unknownDepth=false;data.measurementsConfirmed=false;
-      if(f.depthType)data.depthType=f.depthType;
+      if(f.depthType&&!(f.depthType==='uniforme'&&data.depthType==='variable'&&f.depthMax==null&&['depthMin','depthMax'].includes(state)))data.depthType=f.depthType;
       if(f.depthMin!=null)data.depthMin=f.depthMin;
       if(f.depthMax!=null)data.depthMax=f.depthMax;
       if(!data.depthType&&data.depthMin!=null)data.depthType=data.depthMax!=null&&data.depthMax!==data.depthMin?'variable':'uniforme';
@@ -100,7 +107,7 @@
     if(state==='review')requestId=crypto.randomUUID();
     const done=applyFields({...fields});
     if(!done.length)return false;
-    cachedQuote=null;reply('Anoté: '+done.join(' · ')+'.');
+    cachedQuote=null;
     advance(missingState());return true;
   }
   function buttons(labels){$('actions').replaceChildren();labels.forEach(label=>{const b=document.createElement('button');b.type='button';b.textContent=label;b.onclick=()=>submit(label);$('actions').append(b);});}
@@ -115,6 +122,7 @@
       depth:['¿Cuál es la profundidad, en metros? Acepto coma decimal: por ejemplo “1,4 m”.',[]],
       depthMin:['¿Cuál es la profundidad mínima, en metros?',[]],
       depthMax:['¿Y la profundidad máxima? Debe ser igual o mayor que la mínima ('+data.depthMin+' m).',[]],
+      bottom:['Para recomendarte el servicio correcto: ¿se ve claramente el fondo de la pileta y lo que hay en él (hojas, suciedad, manchas)?',['Sí, se ve claro','No se ve bien']],
       treatment:['El agua de tu pileta se ve verde. Para recomendarte el servicio correcto: ¿hace cuánto no se la limpia ni se le ponen productos? Si pasaron más de 4 meses suele hacer falta una limpieza total.',['Menos de 4 meses','Más de 4 meses','No sé']],
       measuresReview:['Confirmame estos datos: '+num(data.length)+' m de largo × '+num(data.width)+' m de ancho. Profundidad '+(data.depthType==='variable'?'de '+num(data.depthMin)+' a '+num(data.depthMax)+' m':num(data.depthMin)+' m')+'. '+(data.shape==='otra'&&data.poolShape?'Es una forma '+label(AC_CONFIG.shapes,data.poolShape).toLowerCase()+': la superficie es aproximada y se confirma en la visita. ':'')+'¿Son correctos?',['Confirmar medidas','Corregir medidas']],
       zone:['¿En qué localidad está la pileta? Si es otra localidad, escribí su nombre.',AC_CONFIG.zones],
@@ -198,6 +206,10 @@
       if(state==='depthMax'){
         const max=numericText(text,'Profundidad máxima',5);if(max<data.depthMin)throw Error('La profundidad máxima no puede ser menor que '+num(data.depthMin)+' m.');data.depthMax=max;finishDepth();return;
       }
+      if(state==='bottom'){
+        const answer=parseBottom(t);if(!answer)throw Error('Contame si se ve claramente el fondo (sí o no), o elegí una opción.');
+        data.bottomVisible=answer;cachedQuote=null;if(data.editing)continueAfterEdit();else advance(missingState());return;
+      }
       if(state==='treatment'){
         const answer=parseTreatment(t);if(!answer)throw Error('Contame si pasaron menos o más de 4 meses sin limpiar ni poner productos (por ejemplo “hace 6 meses”), o elegí “No sé”.');
         data.lastTreatment=answer;cachedQuote=null;if(data.editing)continueAfterEdit();else advance(missingState());return;
@@ -235,7 +247,7 @@
       data.analysisId=response.id;
       drawAnalysis(analysisResult,response.meta);
       pendingEvaluation=true;
-      data.water=analysisResult.estado_agua;data.algae=analysisResult.presencia_algas_paredes;
+      data.water=analysisResult.estado_agua;data.algae=analysisResult.presencia_algas_paredes;delete data.bottomVisible;
       data.shape=['rectangular','cuadrada'].includes(analysisResult.tipo_pileta)?'rectangular':'otra';
       if(data.shape==='otra'&&AC_CONFIG.shapes&&AC_CONFIG.shapes[analysisResult.tipo_pileta])data.poolShape=analysisResult.tipo_pileta;else delete data.poolShape;
       data.unknown=false;data.unknownDepth=false;delete data.length;delete data.width;delete data.depthMin;delete data.depthMax;

@@ -35,7 +35,7 @@ const UI = (() => {
 
   const ready=api('/api/config').then(config=>Object.assign(AC_CONFIG,config));
 
-  function clean(d){return Object.fromEntries(['shape','poolShape','unknown','unknownDepth','length','width','depthType','depthMin','depthMax','water','algae','zone','name','phone','day','photoName','photoOrigin','analysisId','measurementsConfirmed','lastTreatment'].filter(k=>d[k]!==undefined).map(k=>[k,d[k]]));}
+  function clean(d){return Object.fromEntries(['shape','poolShape','unknown','unknownDepth','length','width','depthType','depthMin','depthMax','water','algae','zone','name','phone','day','photoName','photoOrigin','analysisId','measurementsConfirmed','lastTreatment','bottomVisible'].filter(k=>d[k]!==undefined).map(k=>[k,d[k]]));}
 
   function quote(d){return api('/api/quotes',{method:'POST',body:JSON.stringify(clean(d))});}
 

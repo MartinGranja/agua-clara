@@ -27,6 +27,7 @@ class Consultation(BaseModel):
     photoOrigin: Literal['camera_requested','file','example'] | None = None
     analysisId: UUID | None = None
     measurementsConfirmed: bool = False
+    bottomVisible: Literal['si','no'] | None = None   # «¿se ve claramente el fondo?»: solo con agua dudosa entre mantenimiento y tratamiento
     lastTreatment: Literal['menos_4','mas_4','no_se'] | None = None   # tiempo sin limpieza ni productos (solo se pregunta con agua verde)
 
     @field_validator('name','zone','phone',mode='before')
@@ -99,7 +100,7 @@ class Analysis(BaseModel):
 
 class DialogueRequest(BaseModel):
     model_config = ConfigDict(extra='forbid')
-    step: Literal['photo','size','depthType','depth','depthMin','depthMax','treatment','zone','name','phone','day']
+    step: Literal['photo','size','depthType','depth','depthMin','depthMax','treatment','bottom','zone','name','phone','day']
     analysisId: UUID | None = None
 
 class DialogueReply(BaseModel):
