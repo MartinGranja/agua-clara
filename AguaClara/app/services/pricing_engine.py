@@ -82,11 +82,24 @@ def calculate(d: Consultation) -> dict:
     else:
         # Decimal preserves exact boundaries; no rounding into an adjacent tariff.
         matches=[{'min':lo,'max':hi,'price':TARIFFS['prices'][service][i]} for i,(lo,hi) in enumerate(TARIFFS['ranges']) if Decimal(lo)<=area<=Decimal(hi)]
-        if len(matches)!=1:
+        if len(matches)==2: matches=matches[1:]   # justo en el límite de dos tramos (40 o 54 m²): se usa el tramo de arriba
+        gap=gap_unit(service,area) if not matches else None
+        if gap is not None:
+            result=priced({**q,'ranges':[],'gap':True},service,gap,depth,reason='Superficie entre dos tramos de la tabla: precio promedio de los tramos vecinos, a confirmar en la visita.')
+        elif len(matches)!=1:
             result={**q,'ranges':matches,'reason':'La superficie coincide con dos tramos; requiere revisión.' if matches else 'La superficie no tiene un tramo cargado. Importe a confirmar.'}
         else:
             result=priced({**q,'ranges':matches},service,Decimal(str(matches[0]['price'])),depth,reason='Precotización sujeta a revisión del prestador.')
     return with_range(result,service,area,depth,approximate)
+
+
+def gap_unit(service,area):
+    """Superficie entre dos tramos cargados (p. ej. 21 a 28 m²): promedio de los precios de los tramos vecinos. None si no corresponde."""
+    if any(Decimal(lo)<=area<=Decimal(hi) for lo,hi in TARIFFS['ranges']): return None
+    lower=[i for i,(lo,hi) in enumerate(TARIFFS['ranges']) if Decimal(hi)<area]
+    upper=[i for i,(lo,hi) in enumerate(TARIFFS['ranges']) if Decimal(lo)>area]
+    if not lower or not upper: return None
+    return (Decimal(str(TARIFFS['prices'][service][lower[-1]]))+Decimal(str(TARIFFS['prices'][service][upper[0]])))/2
 
 
 def unit_price(service,area):
@@ -96,7 +109,8 @@ def unit_price(service,area):
         base=Decimal(str(TARIFFS['prices'][service][-1]))
         return base+(area-maximum)*(base/maximum)
     matches=[TARIFFS['prices'][service][i] for i,(lo,hi) in enumerate(TARIFFS['ranges']) if Decimal(lo)<=area<=Decimal(hi)]
-    return Decimal(str(matches[0])) if len(matches)==1 else None
+    if not matches: return gap_unit(service,area)
+    return Decimal(str(matches[-1]))   # en el límite de dos tramos se usa el de arriba
 
 
 def _total(service,unit,factor):
@@ -109,7 +123,7 @@ def with_range(q,service,area,depth,approximate):
     factor=depth_multiplier(depth)
     if factor is None or q['status']=='sin_cobertura':
         return q
-    if q['price'] is None:
+    if q['price'] is None or q.get('gap'):
         # Sin precio fijo (entre tramos o en el límite de dos): se orienta con los precios de los tramos vecinos.
         if len(q['ranges'])==2:
             units=[Decimal(str(m['price'])) for m in q['ranges']]

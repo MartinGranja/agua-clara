@@ -36,16 +36,17 @@ states:
   verde_oscuro_opaco: Verde oscuro / opaco
   desconocido: No estoy seguro/a
 # Formas no rectangulares: la superficie de agua se aproxima como largo × ancho máximos × factor.
-# Son supuestos geométricos editables (círculo y elipse: π/4 exacto; riñón, L e irregular: aproximación gruesa).
+# Criterio del comitente: precio por largo × ancho máximos, sin reducir por la forma (factor 1,0). Si algún día se quiere
+# reducir la superficie, editar los factores (referencia geométrica: círculo y elipse 0,785; riñón 0,70; L 0,75).
 # Estas formas se precotizan igual pero quedan marcadas "a confirmar en la visita".
 shapes:
   rectangular: {factor: 1.0, label: Rectangular}
   cuadrada: {factor: 1.0, label: Cuadrada}
-  ovalada: {factor: 0.785, label: Ovalada}
-  circular: {factor: 0.785, label: Circular}
-  rinon: {factor: 0.70, label: Arriñonada}
-  en_l: {factor: 0.75, label: "En L"}
-  irregular: {factor: 0.70, label: Irregular}
+  ovalada: {factor: 1.0, label: Ovalada}
+  circular: {factor: 1.0, label: Circular}
+  rinon: {factor: 1.0, label: Arriñonada}
+  en_l: {factor: 1.0, label: "En L"}
+  irregular: {factor: 1.0, label: Irregular}
 # Error relativo supuesto de la superficie, para mostrar un rango de precio (análisis de sensibilidad).
 sensitivity:
   exact: 0.05

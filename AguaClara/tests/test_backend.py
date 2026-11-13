@@ -25,7 +25,7 @@ def payload(**changes):return {'requestId':str(uuid4()),'data':{**BASE,**changes
 def png():
     out=io.BytesIO();Image.new('RGB',(32,24),(20,140,100)).save(out,format='PNG');return out.getvalue()
 
-@pytest.mark.parametrize('area,price',[(12,60000),(21,60000),(21.001,None),(24,None),(27.999,None),(28,72000),(39.999,72000),(40,None),(40.001,81000),(53.999,81000),(54,None),(54.001,90000),(60,90000),(60.001,90001.5),(11.999,None)])
+@pytest.mark.parametrize('area,price',[(12,60000),(21,60000),(21.001,66000),(24,66000),(27.999,66000),(28,72000),(39.999,72000),(40,81000),(40.001,81000),(53.999,81000),(54,90000),(54.001,90000),(60,90000),(60.001,90001.5),(11.999,None)])
 def test_tariff_boundaries(area,price):
     assert calculate(Consultation(**{**BASE,'length':area/2,'width':2}))['price']==price
 

@@ -4,6 +4,8 @@ NOVEDAD v6g: AJUSTES DE LAS PRUEBAS DE CAMPO + PREGUNTA «¿SE VE EL FONDO?»
 - Profundidad variable: si el cliente dice «variable» y da mínima y máxima, la IA ya no la cambia a «uniforme»; el precio usa el promedio de ambas.
 - Foto buena rechazada por «poco clara»: el desacuerdo con el detector de color baja la certeza menos (0,925 con 2 niveles de diferencia, 0,85 con más) y ya no manda a revisión por sí solo.
 - Nueva pregunta «¿se ve claramente el fondo de la pileta?», solo cuando la foto dice tratamiento pero el agua es dudosa (cristalina con algas, levemente turbia o verde leve). Si responde que sí: mantenimiento. Pendiente de validar en campo.
+- (v6h) Formas no rectangulares: factor 1,0 (se cotiza largo x ancho máximos, como hace el comitente).
+- (v6h) Superficie entre tramos de la tabla (21 a 28 m²): precio promedio de los tramos vecinos (antes quedaba sin precio), con el rango entre ambos tramos y marcada a confirmar en la visita. Justo en el límite de dos tramos (40 o 54 m²) se usa el tramo de arriba.
 - Pruebas: 229 (tests/test_pruebas_campo.py).
 
 NOVEDAD v6e: RECORRIDOS
@@ -57,7 +59,7 @@ MÓDULO A (simulador de WhatsApp: no envía mensajes reales)
   completa varios datos a la vez; también responde preguntas. Gemini propone, el servidor valida todo;
   si Gemini falla se usan reglas. El precio NUNCA lo decide la IA: sale de la tabla de tarifas.
 - Piletas no rectangulares (ovalada, circular, riñón, en L, irregular): superficie aproximada = largo x ancho
-  x factor de la forma (editable en app/data/tarifas.yaml, sección shapes), marcada "a confirmar en la visita".
+  x factor de la forma (editable en app/data/tarifas.yaml, sección shapes; desde la v6h vale 1,0 para todas, criterio del comitente: largo x ancho máximos), marcada "a confirmar en la visita".
 - La precotización muestra rango de precio (análisis de sensibilidad) y certeza alta / media / baja.
 - Nueva vista "Analíticas" (clave del panel): embudo, distribuciones, calidad de la visión, accuracy, F1,
   matriz de confusión, error del presupuesto (MAE / MAPE) y exportación a CSV.

@@ -129,7 +129,7 @@ def test_perceive_parallel_tiebreak_and_failure():
 # ---------- precio: forma aproximada, rango, certeza ----------
 def test_shape_approximation_and_range():
     q = calculate(Consultation(**{**BASE, 'shape': 'otra', 'poolShape': 'ovalada', 'length': 8, 'width': 5}))
-    assert q['dimensions']['source'] == 'aproximada_por_forma' and q['dimensions']['area'] == pytest.approx(31.4)
+    assert q['dimensions']['source'] == 'aproximada_por_forma' and q['dimensions']['area'] == pytest.approx(40.0)
     assert q['approximate'] and q['price'] is not None and q['priceRange']['max'] >= q['priceRange']['min']
     assert '15 %' in q['priceRange']['basis']
 
@@ -142,7 +142,7 @@ def test_exact_range_is_narrow_and_contains_price():
 
 def test_gap_area_has_neighbour_range():
     q = calculate(Consultation(**{**BASE, 'length': 12, 'width': 2}))   # 24 m²: entre tramos
-    assert q['price'] is None and q['priceRange']['min'] < q['priceRange']['max']
+    assert q['price'] == 66000 and q['priceRange']['min'] < q['price'] < q['priceRange']['max']   # promedio de los tramos vecinos
 
 
 def test_other_shape_without_poolshape_still_requires_review():
