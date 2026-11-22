@@ -3,6 +3,8 @@
 const UI = (() => {
 
   const $=id=>document.getElementById(id);
+  const isAdmin=/^\/admin\/?$/.test(location.pathname);
+  document.querySelector('.topbar nav').hidden=!isAdmin;
 
   const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
@@ -62,7 +64,7 @@ const UI = (() => {
 
   function exportOne(r){download('AguaClara-'+r.id+'.json',JSON.stringify(r,null,2));}
 
-  function view(name){document.querySelectorAll('.view').forEach(e=>e.hidden=e.id!==name);document.querySelectorAll('.nav').forEach(e=>{e.classList.toggle('active',e.dataset.view===name);e.setAttribute('aria-pressed',String(e.dataset.view===name));});clearInterval(pollTimer);if(name==='analytics'&&typeof Analytics!=='undefined')Analytics.load();if(name==='owner'){refresh();pollTimer=setInterval(()=>{if(!document.hidden&&!document.querySelector('#owner-list details[open], #owner-list form :focus'))refresh();},20000);}}
+  function view(name){if(!isAdmin&&name!=='client')return;document.querySelectorAll('.view').forEach(e=>e.hidden=e.id!==name);document.querySelectorAll('.nav').forEach(e=>{e.classList.toggle('active',e.dataset.view===name);e.setAttribute('aria-pressed',String(e.dataset.view===name));});clearInterval(pollTimer);if(name==='analytics'&&typeof Analytics!=='undefined')Analytics.load();if(name==='owner'){refresh();pollTimer=setInterval(()=>{if(!document.hidden&&!document.querySelector('#owner-list details[open], #owner-list form :focus'))refresh();},20000);}}
 
   async function refresh(){
 
@@ -177,7 +179,7 @@ const UI = (() => {
 
   $('export-all').onclick=async()=>{try{const latest=await api('/api/admin/requests');download('AguaClara-consultas.json',JSON.stringify({exportedAt:new Date().toISOString(),records:latest},null,2));}catch(e){toast(e.message);}};
 
-  return {$,esc,money,num,toast,save,quote,api,ready,download,resultText,view,exportOne,fetchFile,SHAPE_LABEL};
+  return {isAdmin,$,esc,money,num,toast,save,quote,api,ready,download,resultText,view,exportOne,fetchFile,SHAPE_LABEL};
 
 })();
 

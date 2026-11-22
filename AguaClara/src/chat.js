@@ -1,5 +1,5 @@
 'use strict';
-/* Simulador de WhatsApp de Agua Clara (no envía mensajes reales).
+/* Asistente de consultas de Agua Clara.
    Diálogo por estados + comprensión de texto libre (/api/understand: Gemini y reglas, siempre re-validado en el servidor).
    El backend analiza la foto (lecturas múltiples + visión clásica), valida y precotiza; el precio sale solo de la tabla de tarifas. */
 (() => {
@@ -130,7 +130,7 @@
       phone:['¿Qué teléfono de contacto querés dejar? Incluí el código de área.',[]],
       day:['¿Qué día preferís? Es una preferencia, no una reserva.',days],
       review:[summary()+'\n\n¿Están bien los datos?',['Confirmar consulta','Cambiar medidas','Cambiar profundidad','Cambiar localidad','Cambiar foto','Cambiar contacto','Cambiar día','Descargar resumen']],
-      done:['Recibimos tu consulta. Identificador: '+savedId+'. Ya le avisamos al equipo de Agua Clara: te van a escribir para confirmar el precio final y el día de la visita.',['Ver panel de admin','Descargar resumen','Imprimir resumen','Nueva consulta']]
+      done:['Recibimos tu consulta. Identificador: '+savedId+'. Ya le avisamos al equipo de Agua Clara: te van a escribir para confirmar el precio final y el día de la visita.',[...(UI.isAdmin?['Ver panel de admin']:[]),'Descargar resumen','Imprimir resumen','Nueva consulta']]
     };
     const [text,choices]=prompts[state];
     if(['review','done','measuresReview'].includes(state)){reply(text,state==='review');buttons(choices);return;}
@@ -159,7 +159,7 @@
     if(t==='cargar foto'||t==='sacar foto ahora'){if(uploading)return;$(t==='cargar foto'?'photo':'camera').click();return;}
     if(t==='reintentar calculo'){prompt();return;}
     if(t==='reintentar analisis'){if(lastFile)await analyzeFile(lastFile,lastOrigin);else reply('Primero adjuntá una foto.');return;}
-    if(t==='ver panel de admin'){UI.view('owner');return;}
+    if(UI.isAdmin&&t==='ver panel de admin'){UI.view('owner');return;}
     if(t==='descargar resumen'){try{validateAll();const q=cachedQuote||await quote();UI.download('AguaClara-precotizacion.txt',(savedId?'Identificador: '+savedId+'\n':'CONSULTA SIN CONFIRMAR\n')+UI.resultText(data,q),'text/plain;charset=utf-8');}catch(e){reply(e.message);}return;}
     if(t==='imprimir resumen'){try{$('print-content').textContent=(savedId?'Identificador: '+savedId+'\n':'')+UI.resultText(data,cachedQuote||await quote());window.print();}catch(e){reply(e.message);}return;}
     draw(text,true);
@@ -172,7 +172,7 @@
     if(state==='measuresReview'&&t==='confirmar medidas'){data.measurementsConfirmed=true;continueAfterEdit();return;}
     if(state==='measuresReview'&&/^(si|correcto|son correctos|son correctas|dale|ok|esta bien|todo bien)[!.\s]*$/.test(t)){data.measurementsConfirmed=true;continueAfterEdit();return;}
     if(/^(cambiar|corregir|modificar)/.test(t)){
-      if(state==='done'){reply('La consulta ya fue guardada. Revisala desde el panel de admin o iniciá una nueva; conservamos el registro original.');return;}
+      if(state==='done'){reply(UI.isAdmin?'La consulta ya fue guardada. Revisala desde el panel de admin o iniciá una nueva; conservamos el registro original.':'La consulta ya fue guardada. Iniciá una nueva para cambiar los datos; conservamos el registro original.');return;}
       const target=/tratamiento|producto|hace cuanto/.test(t)?'treatment':/profundidad/.test(t)?'depthType':/forma/.test(t)?'photo':/medida|tamano/.test(t)?'size':/localidad|zona/.test(t)?'zone':/telefono/.test(t)?'phone':/nombre|contacto/.test(t)?'name':/dia|fecha/.test(t)?'day':/foto|servicio|agua|alga/.test(t)?'photo':null;
       if(target==='treatment'&&!needsTreatment()){reply('Esa pregunta solo se hace cuando el agua se ve verde.');return;}
       if(!target){reply('Podés corregir medidas, profundidad, localidad, contacto, teléfono, día o estado del agua.');return;}
@@ -231,7 +231,7 @@
       if(state==='review'&&/^(confirmar consulta|confirmar datos|confirmo|si|dale|todo bien|esta bien)[!.\s]*$/.test(t)){
         validateAll();busy=true;$('status').textContent='Enviando consulta…';const token=epoch;try{const record=await UI.save({...data},requestId,conversation);if(token!==epoch)return;savedId=record.id;cachedQuote=record.quote;state='done';prompt();}finally{if(token===epoch){busy=false;$('status').textContent='en línea';}}return;
       }
-      if(state==='done'){reply('La consulta ya está guardada. Podés abrir el panel de admin, descargar el resumen o iniciar otra.');return;}
+      if(state==='done'){reply(UI.isAdmin?'La consulta ya está guardada. Podés abrir el panel de admin, descargar el resumen o iniciar otra.':'La consulta ya está guardada. Podés descargar el resumen o iniciar otra.');return;}
       reply('Quiero asegurarme de entenderte bien.');prompt();
     }catch(err){reply(err.message);}
   }
