@@ -54,6 +54,24 @@ const Analytics = (() => {
       '<figcaption>Ahorro de kilómetros (%) de cada recorrido contra el orden en que se anotó. Último: ' + esc(f(last[key], 1)) + ' %.</figcaption></figure>';
   }
 
+  function compare(c) {
+    if (!c || !c.n) return block('Modelo propio frente a Gemini', '<div class="empty small"><p>Todavía no hay fotos analizadas con el clasificador propio. Cada consulta nueva con foto se lee con Gemini y con el modelo propio, y acá se comparan.</p></div>');
+    const chip = (v, real) => v ? '<span class="cmp-chip ' + (real ? (v === real ? 'ok' : 'bad') : 'neutral') + '">' + esc(SERVICE(v)) + '</span>' : '<span class="cmp-chip neutral">—</span>';
+    const pbar = (name, v, cls) => '<div class="hbar"><span>' + esc(name) + '</span><div class="track"><i class="' + cls + '" style="width:' + (v == null ? 0 : Math.max(2, v * 100)).toFixed(1) + '%"></i></div><b>' + pct(v, 0) + '</b></div>';
+    const o = c.propio;
+    let html = '<div class="stats">' + kpi(c.comparables, 'Fotos comparadas', 'leídas por Gemini y por el modelo propio') + kpi(pct(c.coincidencia, 0), 'Coinciden en el servicio', 'misma decisión con la foto sola') +
+      kpi(pct(c.accuracyPropio, 0), 'Acierto del modelo propio', c.etiquetadas ? 'n = ' + c.etiquetadas + ' con servicio real' : 'falta cargar el servicio real') +
+      kpi(pct(c.accuracyGemini, 0), 'Acierto de Gemini', c.etiquetadas ? 'n = ' + c.etiquetadas + ' con servicio real' : 'falta cargar el servicio real') + '</div>';
+    if (c.etiquetadas) {
+      html += '<h3>Acierto sobre las mismas fotos</h3><div class="hbars">' + pbar('Servicio · propio', c.accuracyPropio, 'own') + pbar('Servicio · Gemini', c.accuracyGemini, 'gem') +
+        pbar('¿Necesita tratamiento? · propio', c.tratamientoPropio, 'own') + pbar('¿Necesita tratamiento? · Gemini', c.tratamientoGemini, 'gem') + '</div>';
+      html += '<div class="an-grid"><div><h3>Matriz de confusión · modelo propio</h3>' + confusion(o, SERVICE) + '</div><div><h3>Matriz de confusión · Gemini</h3>' + confusion(c.gemini, SERVICE) + '</div></div>' + '<h3>Por clase · modelo propio</h3>' + perClass(o, SERVICE);
+    } else html += '<p class="help">Para medir el acierto de cada uno, completá «Servicio real» en las consultas del panel.</p>';
+    html += '<h3>Foto por foto</h3><div class="table-wrap"><table class="an-table cmp"><thead><tr><th>Fecha</th><th>Localidad</th><th>Gemini</th><th>Modelo propio</th><th>Prob. tratamiento</th><th>Servicio real</th><th>Coinciden</th></tr></thead><tbody>' +
+      c.filas.map(x => '<tr><td>' + esc((x.fecha || '').slice(0, 10)) + '</td><td>' + esc(x.localidad || '—') + '</td><td>' + chip(x.gemini, x.real) + '</td><td>' + chip(x.propio, x.real) + '</td><td>' + pct(x.probTratamiento, 0) + '</td><td>' + (x.real ? esc(SERVICE(x.real)) : '—') + '</td><td>' + (x.coinciden ? '<b class="cmp-yes">Sí</b>' : '<b class="cmp-no">No</b>') + '</td></tr>').join('') + '</tbody></table></div>';
+    return block('Modelo propio frente a Gemini', html, 'Los dos deciden el servicio solo con la foto, sin la pregunta de tiempo. Verde: coincide con el servicio real; rojo: no coincide; gris: todavía sin servicio real.');
+  }
+
   function moduleA(c) {
     const e = c.embudo, v = c.vision, x = c.exactitud, p = c.presupuesto;
     let html = '<div class="stats">' + kpi(e.consultas, 'Consultas recibidas', e.analisis + (e.analisis === 1 ? ' foto analizada' : ' fotos analizadas')) + kpi(e.conversionPct == null ? '—' : f(e.conversionPct) + ' %', 'Conversión a cliente', e.agendadas + ' agendadas') +
@@ -65,6 +83,7 @@ const Analytics = (() => {
       block('Localidad', bars(c.distribuciones.localidad)) + block('Certeza de la estimación', bars(c.distribuciones.certeza)) + block('Seguimiento', bars(c.distribuciones.resultado)) + '</div>';
     html += block('Calidad de la visión', stats([['Confianza final', v.confianza, 100, 1], ['Acuerdo entre lecturas (%)', v.acuerdoModelo, 100, 1], ['Acuerdo con visión por color (%)', v.acuerdoCV, 100, 1], ['Tiempo de análisis (ms)', v.latenciaMs, 1, 0], ['Índice de turbidez (0–100)', v.indiceTurbidez, 1, 1], ['Intensidad de verde (0–100)', v.intensidadVerde, 1, 1], ['Precio (ARS)', c.precio, 1, 0], ['Duración de la conversación (s)', c.conversacion.duracionSeg, 1, 0], ['Mensajes por conversación', c.conversacion.mensajes, 1, 0]]),
       'Medidas descriptivas sobre todas las fotos y consultas guardadas.');
+    html += compare(c.comparacion);
     // Exactitud contra el estado real cargado por el dueño
     if (!x.etiquetadas) {
       html += block('Exactitud de la IA (accuracy, F1, matriz de confusión)', '<div class="empty small"><p>Todavía no hay consultas con el estado real cargado. Abrí una consulta en el panel, mirá la pileta en la visita y completá «Servicio real». Con ' + x.minimoRecomendado + ' o más (0 de ' + x.minimoRecomendado + ' hasta ahora) las métricas son confiables para el informe.</p></div>');
