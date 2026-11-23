@@ -3,7 +3,7 @@ import os
 from collections import defaultdict,deque
 from pathlib import Path
 from fastapi import FastAPI,Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse,FileResponse
 from fastapi.exceptions import RequestValidationError
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.exc import SQLAlchemyError
@@ -55,6 +55,12 @@ def create_app(config:Settings|None=None):
         return JSONResponse({'detail':'No pudimos guardar los datos. Reintentá en un momento.'},503)
 
     app.include_router(router)
+
+    @app.get('/admin',include_in_schema=False)
+    @app.get('/admin/',include_in_schema=False)
+    async def admin_frontend():
+        return FileResponse(ROOT/'src'/'index.html')
+
     app.mount('/',StaticFiles(directory=ROOT/'src',html=True),name='frontend')
     return app
 
