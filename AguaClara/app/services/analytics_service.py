@@ -78,9 +78,44 @@ def consultas(requests, analyses):
         'servicioVisionClasica': m.classification_report(service_cv_pairs, service_labels),
         'minimoRecomendado': 30,
     }
+    out['comparacion'] = comparacion(requests, analyses)
     out['presupuesto'] = {'conPrecioRevisado': len(reviewed), 'error': m.regression_report([(real, est) for real, est in reviewed]),
                           'ajustadasPct': round(100 * sum(1 for r, e in reviewed if abs(r - e) > 0.5) / len(reviewed), 1) if reviewed else None}
     return out
+
+
+def comparacion(requests, analyses, limit=60):
+    """Gemini (lectura fusionada) contra el clasificador propio, foto por foto. Ambos deciden solo con la foto (sin la pregunta
+    de tiempo), así que son comparables entre sí y contra el servicio real que cargó el dueño."""
+    by_a = {r['data'].get('analysisId'): r for r in requests if r['data'].get('analysisId')}
+    labels = ['mantenimiento', 'recuperacion', 'limpieza_total']
+    rows = []
+    for a in analyses:
+        res, own = a.get('result') or {}, (a.get('meta') or {}).get('propio')
+        if not res.get('es_pileta') or not own:
+            continue
+        r = by_a.get(a['id']) or {}
+        val = r.get('validation') or {}
+        real = (val.get('service') or service_of(val.get('water'), val.get('algae'))) if val else None
+        gem = service_of(res.get('estado_agua'), res.get('presencia_algas_paredes'))
+        rows.append({'id': a['id'], 'fecha': r.get('createdAt', ''), 'localidad': (r.get('data') or {}).get('zone', ''), 'gemini': gem, 'propio': own.get('servicio'),
+                     'estadoAgua': res.get('estado_agua'), 'confianzaGemini': res.get('confianza'), 'probTratamiento': own.get('prob_tratamiento'),
+                     'confianzaPropio': own.get('confianza'), 'real': real, 'coinciden': bool(gem and gem == own.get('servicio'))})
+    rows.sort(key=lambda x: x['fecha'], reverse=True)
+    both = [x for x in rows if x['gemini'] and x['propio']]
+    graded = [x for x in both if x['real']]
+    acc = lambda k, xs: round(sum(1 for x in xs if x[k] == x['real']) / len(xs), 4) if xs else None
+    treat = lambda v: None if v is None else v != 'mantenimiento'
+    return {
+        'n': len(rows), 'comparables': len(both), 'etiquetadas': len(graded),
+        'coincidencia': round(sum(1 for x in both if x['coinciden']) / len(both), 4) if both else None,
+        'accuracyGemini': acc('gemini', graded), 'accuracyPropio': acc('propio', graded),
+        'tratamientoGemini': round(sum(1 for x in graded if treat(x['gemini']) == treat(x['real'])) / len(graded), 4) if graded else None,
+        'tratamientoPropio': round(sum(1 for x in graded if treat(x['propio']) == treat(x['real'])) / len(graded), 4) if graded else None,
+        'propio': m.classification_report([(x['real'], x['propio']) for x in graded], labels),
+        'gemini': m.classification_report([(x['real'], x['gemini']) for x in graded], labels),
+        'filas': rows[:limit],
+    }
 
 
 def _end_minutes(route):
