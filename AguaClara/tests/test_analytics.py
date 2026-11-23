@@ -295,3 +295,21 @@ def test_service_only_label_and_validation_rules(client):
     assert x['etiquetadas'] == 1 and x['servicio']['accuracy'] == 1.0 and x['servicioVisionClasica']['accuracy'] == 1.0
     assert x['estadoAgua']['n'] == 0 and x['algas']['n'] == 0 and x['forma']['n'] == 0              # lo que no se cargó no se cuenta
     assert 'recuperacion' in client.get('/api/admin/export/analisis').text
+
+
+def test_comparacion_gemini_vs_modelo_propio(client):
+    store = client.app.state.store
+    casos = [('cristalina', False, 'mantenimiento', 'mantenimiento', 'mantenimiento'),   # ambos aciertan
+             ('verde_intenso', True, 'mantenimiento', 'recuperacion', 'recuperacion'),   # solo Gemini acierta
+             ('turbia', False, 'limpieza_total', 'mantenimiento', None)]      # ambos fallan: el dueño dice mantenimiento
+    for water, algae, propio, real, _ in casos:
+        aid = str(uuid4())
+        meta = {'muestras': 2, 'acuerdoModelo': 1.0, 'propio': {'servicio': propio, 'prob_tratamiento': 0.4, 'confianza': 0.6, 'base': 'foto'}}
+        store.save_analysis(aid, {'id': aid, 'result': analysis(estado_agua=water, presencia_algas_paredes=algae).model_dump(), 'model': 't', 'meta': meta})
+        rid = client.post('/api/requests', json={'requestId': str(uuid4()), 'data': {**BASE, 'analysisId': aid, 'water': water, 'algae': algae}}).json()['id']
+        assert client.patch(f'/api/admin/requests/{rid}/validation', json={'service': real}).status_code == 200
+    c = client.get('/api/admin/analytics').json()['consultas']['comparacion']
+    assert c['comparables'] == 3 and c['etiquetadas'] == 3 and len(c['filas']) == 3
+    assert c['accuracyPropio'] == round(1 / 3, 4) and c['accuracyGemini'] == round(2 / 3, 4) and c['coincidencia'] == round(2 / 3, 4)
+    assert c['propio']['n'] == 3 and c['gemini']['n'] == 3
+    assert all(set(f) >= {'gemini', 'propio', 'real', 'coinciden'} for f in c['filas'])
