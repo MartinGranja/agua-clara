@@ -83,12 +83,14 @@
       if(data.depthType==='variable'&&data.depthMin!=null&&data.depthMax!=null&&data.depthMax<data.depthMin)[data.depthMin,data.depthMax]=[data.depthMax,data.depthMin];
       if(data.depthMin!=null)done.push('profundidad '+(data.depthType==='variable'&&data.depthMax!=null?num(data.depthMin)+' a '+num(data.depthMax):num(data.depthMin))+' m');
     }
-    if(f.zone){data.zone=f.zone;done.push('localidad '+f.zone);if(!AC_CONFIG.zones.includes(f.zone))done.push('(fuera de la cobertura confirmada: queda para revisión)');}
+    if(f.zone&&AC_CONFIG.zones.includes(f.zone)){data.zone=f.zone;done.push('localidad '+f.zone);}
     if(f.name){data.name=f.name;done.push('nombre '+f.name);}
     if(f.phone){try{PricingEngine.contact({name:data.name||'xx',phone:f.phone,day:'A coordinar'});data.phone=f.phone;done.push('teléfono');}catch{}}
     if(f.day){data.day=f.day;done.push('día '+f.day);}
     return done;
   }
+  function coverageText(z){return 'Por ahora trabajamos solo en '+AC_CONFIG.zones.join(', ')+'. «'+z+'» queda fuera de nuestra cobertura. No podemos tomar esta consulta. ¡Gracias por escribirnos! Si tenés una pileta en alguna de esas localidades, iniciá una nueva consulta.';}
+  function closeOutOfZone(z){epoch++;busy=false;uploading=false;$('status').textContent='en línea';state='closed';reply(coverageText(z));buttons(['Nueva consulta']);}
   async function interpret(text,t){
     if(!['size','depthType','depth','depthMin','depthMax','zone','name','phone','day','measuresReview','review'].includes(state))return false;
     const quick=new Set(['uniforme','variable','a coordinar','confirmar consulta','confirmar datos','confirmo','si','dale','todo bien','esta bien','confirmar medidas','corregir medidas',...days.map(normalize),...AC_CONFIG.zones.map(normalize)]);
@@ -100,6 +102,7 @@
     typing(false);busy=false;$('status').textContent='en línea';
     if(!u)return false;
     const fields=u.fields||{};
+    if(fields.zone&&!AC_CONFIG.zones.includes(fields.zone)){const bad=fields.zone;delete fields.zone;closeOutOfZone(bad);return true;}
     if(!Object.keys(fields).length){
       if(u.intent==='pregunta'&&u.reply){reply(u.reply);if(state!=='review')await prompt();else buttons(['Confirmar consulta','Cambiar medidas','Cambiar profundidad','Cambiar localidad','Cambiar foto','Cambiar contacto','Cambiar día','Descargar resumen']);return true;}
       return false;
@@ -125,7 +128,7 @@
       bottom:['Para recomendarte el servicio correcto: ¿se ve claramente el fondo de la pileta y lo que hay en él (hojas, suciedad, manchas)?',['Sí, se ve claro','No se ve bien']],
       treatment:['El agua de tu pileta se ve verde. Para recomendarte el servicio correcto: ¿hace cuánto no se la limpia ni se le ponen productos? Si pasaron más de 4 meses suele hacer falta una limpieza total.',['Menos de 4 meses','Más de 4 meses','No sé']],
       measuresReview:['Confirmame estos datos: '+num(data.length)+' m de largo × '+num(data.width)+' m de ancho. Profundidad '+(data.depthType==='variable'?'de '+num(data.depthMin)+' a '+num(data.depthMax)+' m':num(data.depthMin)+' m')+'. '+(data.shape==='otra'&&data.poolShape?'Es una forma '+label(AC_CONFIG.shapes,data.poolShape).toLowerCase()+': la superficie es aproximada y se confirma en la visita. ':'')+'¿Son correctos?',['Confirmar medidas','Corregir medidas']],
-      zone:['¿En qué localidad está la pileta? Si es otra localidad, escribí su nombre.',AC_CONFIG.zones],
+      zone:['¿En qué localidad está la pileta? Trabajamos en '+AC_CONFIG.zones.join(', ')+'.',AC_CONFIG.zones],
       name:['¿Cómo te llamás?',[]],
       phone:['¿Qué teléfono de contacto querés dejar? Incluí el código de área.',[]],
       day:['¿Qué día preferís? Es una preferencia, no una reserva.',days],
@@ -164,11 +167,12 @@
     if(t==='imprimir resumen'){try{$('print-content').textContent=(savedId?'Identificador: '+savedId+'\n':'')+UI.resultText(data,cachedQuote||await quote());window.print();}catch(e){reply(e.message);}return;}
     draw(text,true);
     if(/^(nueva consulta|reiniciar|empezar de nuevo)$/.test(t)){reset();return;}
+    if(state==='closed'){reply('Esta consulta se cerró porque la pileta está fuera de nuestra zona. Si querés consultar por otra pileta, iniciá una nueva.');buttons(['Nueva consulta']);return;}
     if(uploading){reply('Esperá a que termine la validación de la foto antes de continuar.');return;}
     if(/^(hola|buenas|buen dia|buenos dias|buenas tardes|buenas noches|hey)[!.\s]*$/.test(t)){reply('¡Hola! Seguimos con tu pileta.');prompt();return;}
     if(/^(gracias|muchas gracias|genial|perfecto)[!.\s]*$/.test(t)){reply('¡De nada! Podés seguir con las opciones de abajo.');return;}
     if(/^(ver resumen|resumen|mis datos)$/.test(t)){reply(summary(),true);return;}
-    if(state==='measuresReview'&&t==='corregir medidas'){data.measurementsConfirmed=false;advance('size');return;}
+    if(state==='measuresReview'&&t==='corregir medidas'){data.measurementsConfirmed=false;delete data.depthType;delete data.depthMin;delete data.depthMax;data.unknownDepth=false;advance('size');return;}
     if(state==='measuresReview'&&t==='confirmar medidas'){data.measurementsConfirmed=true;continueAfterEdit();return;}
     if(state==='measuresReview'&&/^(si|correcto|son correctos|son correctas|dale|ok|esta bien|todo bien)[!.\s]*$/.test(t)){data.measurementsConfirmed=true;continueAfterEdit();return;}
     if(/^(cambiar|corregir|modificar)/.test(t)){
@@ -176,7 +180,8 @@
       const target=/tratamiento|producto|hace cuanto/.test(t)?'treatment':/profundidad/.test(t)?'depthType':/forma/.test(t)?'photo':/medida|tamano/.test(t)?'size':/localidad|zona/.test(t)?'zone':/telefono/.test(t)?'phone':/nombre|contacto/.test(t)?'name':/dia|fecha/.test(t)?'day':/foto|servicio|agua|alga/.test(t)?'photo':null;
       if(target==='treatment'&&!needsTreatment()){reply('Esa pregunta solo se hace cuando el agua se ve verde.');return;}
       if(!target){reply('Podés corregir medidas, profundidad, localidad, contacto, teléfono, día o estado del agua.');return;}
-      if(!data.day){reply('Completá primero el recorrido; después podrás corregir cada dato desde el resumen.');return;}
+      if(!data.day&&!['size','depthType'].includes(target)){reply('Completá primero el recorrido; después podrás corregir cada dato desde el resumen.');return;}
+      if(target==='size'){delete data.depthType;delete data.depthMin;delete data.depthMax;data.unknownDepth=false;}
       requestId=crypto.randomUUID();data.editing=true;if(['size','depthType','photo'].includes(target))data.measurementsConfirmed=false;if(target==='photo')delete data.analysisId;advance(target);return;
     }
     if(await interpret(text,t))return;
@@ -217,7 +222,7 @@
       if(state==='zone'){
         const location=text.replace(/^(vivo en|estoy en|en)\s+/i,'').trim();
         if(location.length<3||location.length>80||/\d|\?|no se|no tengo/.test(normalize(location)))throw Error('Escribí una localidad de 3 a 80 caracteres.');
-        const z=AC_CONFIG.zones.find(z=>normalize(z)===normalize(location));data.zone=z||location;if(!z)reply('Esa localidad queda fuera de nuestra cobertura confirmada. Dejamos la consulta para revisar.');continueAfterEdit();return;
+        const z=AC_CONFIG.zones.find(z=>normalize(z)===normalize(location));if(!z){closeOutOfZone(location);return;}data.zone=z;continueAfterEdit();return;
       }
       if(state==='name'){
         const name=text.replace(/^(me llamo|mi nombre es|soy)\s+/i,'').trim();if(name.length<2||name.length>80||/[\d?]/.test(name))throw Error('Ingresá un nombre de entre 2 y 80 caracteres, sin números.');data.name=name;continueAfterEdit();return;
@@ -257,7 +262,7 @@
   }
   async function onPhoto(event){
     const file=event.target.files[0];event.target.value='';if(!file)return;
-    if(state==='done'){reply('Iniciá una nueva consulta para adjuntar otra foto.');return;}
+    if(state==='done'||state==='closed'){reply('Iniciá una nueva consulta para adjuntar otra foto.');return;}
     if(!['image/jpeg','image/png','image/webp'].includes(file.type)||file.size>10*1024*1024||!file.size){reply('Elegí un JPG, PNG o WebP de hasta 10 MB.');return;}
     const token=epoch;let url='';busy=true;
     try{
