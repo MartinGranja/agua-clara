@@ -197,8 +197,20 @@ def llm_extract(text, step, shape, settings):
     return Understanding.model_validate_json(response.text or '')
 
 
+DEPTH_STEPS = ('depthType', 'depth', 'depthMin', 'depthMax')
+
+
+def _ambiguous_pair(text, step):
+    """«2x1» en un paso de profundidad no es largo y ancho ni una profundidad: se vuelve a preguntar sin tocar las medidas."""
+    t = _fold(text)
+    pair = re.search(NUM + r'\s*(?:m|mts?|metros?)?\s*(?:x|por|\*|×)\s*' + NUM, t)
+    return step in DEPTH_STEPS and bool(pair) and not re.search(r'largo|ancho|diametro|profund', t)
+
+
 def understand(text, step, shape, settings):
     """Devuelve {source, intent, fields, rejected, reply}. Nunca lanza: si Gemini falla se usan las reglas."""
+    if _ambiguous_pair(text, step):
+        return {'source': 'reglas', 'intent': 'otro', 'fields': {}, 'reply': None}
     rules, _ = sanitize(rule_extract(text, step))
     model, source, reply, intent = {}, 'reglas', None, None
     if settings.gemini_api_key:
