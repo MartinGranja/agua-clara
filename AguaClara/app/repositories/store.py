@@ -123,6 +123,20 @@ class Store:
             record=json.loads(row.body);record.update(notification=result,notificationSent=bool(result.get('ok')))
             return self._save(db,str(request_id),record)
 
+    def delete_request(self,request_id):
+        """Borra la consulta y, si ninguna otra la usa, su análisis de foto."""
+        with Session(self.engine) as db:
+            row=db.get(RequestRow,str(request_id))
+            if not row: raise KeyError(request_id)
+            aid=(json.loads(row.body).get('data') or {}).get('analysisId')
+            db.delete(row)
+            if aid:
+                used=any((json.loads(r.body).get('data') or {}).get('analysisId')==aid for r in db.scalars(select(RequestRow)) if r.id!=str(request_id))
+                analysis=db.get(AnalysisRow,str(aid))
+                if analysis and not used: db.delete(analysis)
+            db.commit()
+            return {'deleted':str(request_id)}
+
     def set_outcome(self,request_id,outcome):
         with Session(self.engine) as db:
             row=db.get(RequestRow,str(request_id))
