@@ -101,6 +101,11 @@ def renotify(request_id:UUID,request:Request):
     if not state.store.get_request(request_id):raise HTTPException(404,'No se encontró la solicitud.')
     return notify_owner(state,{'id':str(request_id)},True)
 
+@router.delete('/api/admin/requests/{request_id}',dependencies=[Depends(owner)])
+def remove(request_id:UUID,request:Request):
+    try:return request.app.state.store.delete_request(str(request_id))
+    except KeyError:raise HTTPException(404,'No se encontró la solicitud.')
+
 @router.patch('/api/admin/requests/{request_id}/outcome',dependencies=[Depends(owner)])
 def outcome(request_id:UUID,data:Outcome,request:Request):
     try:return request.app.state.store.set_outcome(str(request_id),data.outcome)
