@@ -313,3 +313,22 @@ def test_comparacion_gemini_vs_modelo_propio(client):
     assert c['accuracyPropio'] == round(1 / 3, 4) and c['accuracyGemini'] == round(2 / 3, 4) and c['coincidencia'] == round(2 / 3, 4)
     assert c['propio']['n'] == 3 and c['gemini']['n'] == 3
     assert all(set(f) >= {'gemini', 'propio', 'real', 'coinciden'} for f in c['filas'])
+
+
+def test_dos_por_uno_en_profundidad_no_toca_las_medidas():
+    from app.services.understand_service import understand
+    s = SimpleNamespace(gemini_api_key='')
+    assert understand('2x1', 'depth', None, s)['fields'] == {}                    # ni largo/ancho ni profundidad: se vuelve a preguntar
+    assert understand('7 x 3', 'size', None, s)['fields']['length'] == 7           # en el paso de medidas sigue funcionando
+    assert understand('1,5', 'depth', None, s)['fields']['depthMin'] == 1.5
+
+
+def test_eliminar_consulta_borra_tambien_su_analisis(client):
+    store = client.app.state.store
+    aid = str(uuid4())
+    store.save_analysis(aid, {'id': aid, 'result': analysis().model_dump(), 'model': 't', 'meta': {}})
+    rid = client.post('/api/requests', json={'requestId': str(uuid4()), 'data': {**BASE, 'analysisId': aid}}).json()['id']
+    assert client.delete(f'/api/admin/requests/{rid}').json() == {'deleted': rid}
+    assert client.delete(f'/api/admin/requests/{rid}').status_code == 404
+    assert all(r['id'] != rid for r in client.get('/api/admin/requests').json())
+    assert store.get_analysis(aid) is None
